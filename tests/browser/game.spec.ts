@@ -84,13 +84,14 @@ test('手机竖屏、横屏和双拇指输入', async ({ browser }) => {
   await cdp.send('Input.dispatchTouchEvent', { type: 'touchEnd', touchPoints: [] });
   const moved = await page.evaluate(() => (window as any).__tankBattle.state.tanks[0]);
   expect(moved.z).toBeCloseTo(before.z);
-  // 松开摇杆后旋转镜头，再次向左推；位移应跟随新的画面左侧。
+  // 转动镜头后反向返回中央空地，避免慢速 CI 的额外行进撞上侧翼岩石。
   await cdp.send('Input.dispatchTouchEvent', { type: 'touchStart', touchPoints: [right] });
   await cdp.send('Input.dispatchTouchEvent', { type: 'touchMove', touchPoints: [{ ...right, x: right.x - 100 }] });
   await cdp.send('Input.dispatchTouchEvent', { type: 'touchEnd', touchPoints: [] });
   const rotated = await page.evaluate(() => (window as any).__tankBattle);
-  await cdp.send('Input.dispatchTouchEvent', { type: 'touchStart', touchPoints: [left] });
-  await expect.poll(() => page.evaluate(() => (window as any).__tankBattle.state.tanks[0].x)).toBeGreaterThan(moved.x + 1);
+  const returnStick = { x: stick.x + stick.width - 12, y: stick.y + stick.height / 2, id: 1 };
+  await cdp.send('Input.dispatchTouchEvent', { type: 'touchStart', touchPoints: [returnStick] });
+  await expect.poll(() => page.evaluate(() => (window as any).__tankBattle.state.tanks[0].x)).toBeLessThan(moved.x - 1);
   await cdp.send('Input.dispatchTouchEvent', { type: 'touchEnd', touchPoints: [] });
   const diagnostics = await page.evaluate(() => (window as any).__tankBattle);
   const dx = diagnostics.state.tanks[0].x - rotated.state.tanks[0].x;
