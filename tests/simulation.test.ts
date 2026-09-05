@@ -4,7 +4,7 @@ import { BASE, cleanInput, damageHandling, type Power, type Shell } from '../src
 import { blocked, createMap, findPath, segmentCircle } from '../src/game/world';
 
 function battle() {
-  const sim = new Simulation(25);
+  const sim = new Simulation(25, 'defense');
   const player = sim.addPlayer('player', '测试坦克')!;
   sim.start();
   sim.state.phase = 'battle';

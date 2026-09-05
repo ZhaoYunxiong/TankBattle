@@ -15,13 +15,25 @@ try {
   const response = await page.goto(url, { waitUntil: 'networkidle', timeout: 60000 });
   assert.equal(response.status(), 200);
   await page.locator('#soloButton').waitFor({ state: 'visible' });
+  assert.equal(await page.locator('#modeClassic').getAttribute('aria-pressed'), 'true');
   await page.screenshot({ path: 'artifacts/published-menu.png' });
   await page.locator('#soloButton').tap();
   await page.locator('#hud').waitFor({ state: 'visible' });
   await page.waitForFunction(() => /敌军/.test(document.querySelector('#enemyCount')?.textContent || ''), null, { timeout: 20000 });
   assert.match(await page.locator('#enemyCount').textContent(), /敌军/);
   assert.equal(await page.evaluate(() => document.documentElement.scrollWidth <= innerWidth), true);
+  assert.equal(await page.locator('#modeName').textContent(), '经典模式');
+  assert.equal(await page.locator('#enemyBaseCard').isVisible(), true);
+  assert.match(await page.locator('#pickupLabels [data-power=heal]').textContent(), /满血无需维修/);
   await page.screenshot({ path: 'artifacts/published-battle.png' });
+  await page.locator('#pauseButton').tap();
+  await page.locator('#backMenu').tap();
+  await page.locator('#modeDefense').tap();
+  await page.locator('#soloButton').tap();
+  await page.waitForFunction(() => /敌军/.test(document.querySelector('#enemyCount')?.textContent || ''), null, { timeout: 20000 });
+  assert.equal(await page.locator('#modeName').textContent(), '防守模式');
+  assert.equal(await page.locator('#enemyBaseCard').isVisible(), false);
+  await page.screenshot({ path: 'artifacts/published-defense.png' });
   await page.locator('#pauseButton').tap();
   await page.locator('#backMenu').tap();
   await page.locator('#hostButton').tap();
@@ -33,14 +45,17 @@ try {
   await guest.goto(url + '?room=' + code);
   await guest.locator('#connectButton').tap();
   await guest.locator('#lobbyDialog').waitFor({ state: 'visible', timeout: 40000 });
+  assert.match(await guest.locator('#lobbyMode').textContent(), /防守模式/);
   await guest.locator('#readyButton').tap();
   await page.locator('#startRoom').tap();
   await guest.locator('#hud').waitFor({ state: 'visible' });
   await guest.waitForFunction(() => /敌军/.test(document.querySelector('#enemyCount')?.textContent || ''), null, { timeout: 20000 });
   assert.match(await guest.locator('#enemyCount').textContent(), /敌军/);
+  assert.equal(await guest.locator('#modeName').textContent(), '防守模式');
+  assert.equal(await guest.locator('#enemyBaseCard').isVisible(), false);
   await guest.screenshot({ path: 'artifacts/published-multiplayer.png' });
   assert.deepEqual(errors, []);
-  console.log(JSON.stringify({ url, http: response.status(), singlePlayer: 'passed', mobileLayout: 'passed', publicWebRTC: 'passed', pageErrors: errors }));
+  console.log(JSON.stringify({ url, http: response.status(), singlePlayer: 'passed', modes: ['classic', 'defense'], pickupFeedback: 'passed', mobileLayout: 'passed', publicWebRTC: 'passed', pageErrors: errors }));
 } finally {
   await browser.close();
 }

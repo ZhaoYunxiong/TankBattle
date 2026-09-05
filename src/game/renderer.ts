@@ -12,7 +12,7 @@ import '@babylonjs/core/Lights/Shadows/shadowGeneratorSceneComponent';
 import { StandardMaterial } from '@babylonjs/core/Materials/standardMaterial';
 import { TransformNode } from '@babylonjs/core/Meshes/transformNode';
 import { VertexBuffer } from '@babylonjs/core/Buffers/buffer';
-import { angleDiff, BASE, clamp, COLORS, distance, groundHeight, type BattleEvent, type Obstacle, type State, type Tank } from './types';
+import { angleDiff, ARENA, BASE, ENEMY_BASE, clamp, COLORS, distance, groundHeight, type BattleEvent, type GameMode, type Obstacle, type State, type Tank } from './types';
 import { seededRandom, segmentCircle } from './world';
 import { BattleAudio } from './audio';
 import { CAMERA } from './camera';
@@ -64,9 +64,9 @@ export class BattleRenderer {
 
   private elapsed = 0;
 
-  private baseCore: Mesh;
+  private camps = new Map<Tank['team'], { root: TransformNode; beacon: Mesh }>();
 
-  private baseBeacon: Mesh;
+  private mode: GameMode | null = null;
 
   private lowQuality = false;
 
@@ -97,8 +97,6 @@ export class BattleRenderer {
     this.shadows.normalBias = 0.12;
     this.shadows.darkness = 0.3;
     this.terrain = new TransformNode('landscape', this.scene);
-    this.baseCore = this.box('camp', 3.7, 2.2, 3.7, '#e9d9b7', this.terrain);
-    this.baseBeacon = this.box('beacon', 1, 1, 1, '#b7e8d8', this.terrain);
     this.setQuality('auto');
     window.addEventListener('resize', () => this.engine.resize());
   }
@@ -143,32 +141,40 @@ export class BattleRenderer {
     this.terrain.dispose();
     this.terrain = new TransformNode('landscape', this.scene);
     this.obstacles.clear();
+    this.camps.clear();
     this.seed = state.seed;
+    this.mode = state.mode;
     this.seenEvent = state.events.at(-1)?.id ?? 0;
     for (const p of this.particles) p.mesh.dispose();
     this.particles = [];
     const random = seededRandom(state.seed + 42);
-    const floor = MeshBuilder.CreateGround('valley', { width: 60, height: 72, subdivisions: 48, updatable: true }, this.scene);
+    const floor = MeshBuilder.CreateGround('valley', { width: ARENA.x * 2 + 6, height: ARENA.z * 2 + 8, subdivisions: 48, updatable: true }, this.scene);
     const positions = floor.getVerticesData(VertexBuffer.PositionKind)!;
     for (let i = 0; i < positions.length; i += 3) positions[i + 1] = groundHeight(positions[i], positions[i + 2]);
     floor.updateVerticesData(VertexBuffer.PositionKind, positions);
     floor.material = this.material('#b7bc9c');
     floor.parent = this.terrain;
     floor.receiveShadows = true;
-    const base = this.box('island-foundation', 60, 3, 72, '#baa990', this.terrain);
+    const base = this.box('island-foundation', ARENA.x * 2 + 6, 3, ARENA.z * 2 + 8, '#baa990', this.terrain);
     base.position.y = -1.8;
     // 地面路径跟随高度，避免在坡面上出现悬浮或深度闪烁。
-    const path = MeshBuilder.CreateGround('sand-path', { width: 5, height: 61, subdivisions: 35, updatable: true }, this.scene);
-    const pv = path.getVerticesData(VertexBuffer.PositionKind)!;
-    for (let i = 0; i < pv.length; i += 3) pv[i + 1] = groundHeight(pv[i], pv[i + 2]) + 0.025;
-    path.updateVerticesData(VertexBuffer.PositionKind, pv);
-    path.material = this.material('#d4c8a9');
-    path.parent = this.terrain;
-    path.receiveShadows = true;
-    for (let i = 0; i < 46; i++) {
+    const road = (x: number, z: number, width: number, height: number, layer = 0) => {
+      const path = MeshBuilder.CreateGround('sand-path', { width, height, subdivisions: 35, updatable: true }, this.scene);
+      const pv = path.getVerticesData(VertexBuffer.PositionKind)!;
+      for (let i = 0; i < pv.length; i += 3) pv[i + 1] = groundHeight(pv[i] + x, pv[i + 2] + z) + 0.025 + layer * 0.008;
+      path.updateVerticesData(VertexBuffer.PositionKind, pv);
+      path.position.set(x, 0, z);
+      path.material = this.material('#d4c8a9');
+      path.parent = this.terrain;
+      path.receiveShadows = true;
+    };
+    road(0, 0, 6, ARENA.z * 2 - 6);
+    for (const x of [-22, 22]) road(x, 0, 3.2, ARENA.z * 2 - 18);
+    for (const z of [-18, 0, 18]) road(0, z, ARENA.x * 2 - 12, 3.2, 1);
+    for (let i = 0; i < 48; i++) {
       const side = i % 2 ? -1 : 1;
-      const x = side * (30 + random() * 7);
-      const z = -36 + Math.floor(i / 2) * 3.4;
+      const x = side * (ARENA.x + 3 + random() * 7);
+      const z = -ARENA.z - 5 + Math.floor(i / 2) * (ARENA.z * 2 + 10) / 23;
       const h = 5 + random() * 10;
       const peak = this.cylinder('mountain', 0.5 + random(), 9 + random() * 7, h, ['#9fae9e', '#bdc1a8', '#c6b7a3'][i % 3], this.terrain, 5);
       peak.position.set(x, h * 0.5 - 1, z);
@@ -179,37 +185,49 @@ export class BattleRenderer {
         cap.position.set(x, h - 1, z);
       }
     }
-    for (let i = 0; i < 12; i++) {
+    for (let i = 0; i < 14; i++) {
       const m = this.cylinder('far-ridge', 0, 12, 8 + random() * 8, '#a7b9b0', this.terrain, 5);
-      m.position.set(-39 + i * 7, 3, -40 - random() * 10);
+      m.position.set(-ARENA.x - 12 + i * (ARENA.x * 2 + 24) / 13, 3, -ARENA.z - 8 - random() * 10);
     }
     for (let i = 0; i < 100; i++) {
-      const x = (random() - 0.5) * 53;
-      const z = (random() - 0.5) * 62;
-      if (Math.abs(x) < 3 || distance({ x, z }, BASE) < 7) continue;
+      const x = (random() - 0.5) * (ARENA.x * 2 - 4);
+      const z = (random() - 0.5) * (ARENA.z * 2 - 4);
+      if (Math.abs(x) < 3.5 || Math.abs(Math.abs(x) - 22) < 2 || [-18, 0, 18].some(crossing => Math.abs(z - crossing) < 2) || distance({ x, z }, BASE) < 7 || distance({ x, z }, ENEMY_BASE) < 7) continue;
       const grass = this.cylinder('grass', 0.08, 0.5, 0.25 + random() * 0.2, i % 3 ? '#9da989' : '#d9ca9e', this.terrain, 4);
       grass.position.set(x, groundHeight(x, z) + 0.1, z);
       grass.rotation.y = random() * 6;
     }
     for (const obstacle of state.obstacles) this.buildObstacle(obstacle);
-    const plinth = this.cylinder('camp-platform', 7.3, 7.6, 0.35, '#d7cbb0', this.terrain, 8);
-    plinth.position.set(BASE.x, 0.07, BASE.z);
-    this.baseCore = this.box('camp', 3.6, 2, 3.6, '#e6d9bc', this.terrain);
-    this.baseCore.position.set(BASE.x, 1.1, BASE.z);
-    const roof = this.cylinder('camp-roof', 2.8, 5, 0.8, '#6f8e81', this.terrain, 4);
+    this.buildCamp('player');
+    if (state.mode === 'classic') this.buildCamp('enemy');
+  }
+
+  private buildCamp(team: Tank['team']) {
+    const enemy = team === 'enemy';
+    const position = enemy ? ENEMY_BASE : BASE;
+    const root = new TransformNode(team + '-camp', this.scene);
+    root.parent = this.terrain;
+    root.position.set(position.x, groundHeight(position.x, position.z), position.z);
+    root.rotation.y = enemy ? Math.PI : 0;
+    const plinth = this.cylinder('camp-platform', 7.3, 7.6, 0.35, enemy ? '#d3b39c' : '#d7cbb0', root, 8);
+    plinth.position.y = 0.07;
+    const core = this.box('camp', 3.6, 2, 3.6, enemy ? '#d8bba3' : '#e6d9bc', root);
+    core.position.y = 1.1;
+    const roof = this.cylinder('camp-roof', 2.8, 5, 0.8, enemy ? '#a26655' : '#6f8e81', root, 4);
     roof.rotation.y = Math.PI / 4;
-    roof.position.set(BASE.x, 2.5, BASE.z);
-    const door = this.box('camp-door', 0.8, 1.35, 0.05, '#6c7567', this.terrain);
-    door.position.set(0, 0.8, BASE.z - 1.82);
-    const pole = this.cylinder('flag-pole', 0.08, 0.08, 3, '#565f54', this.terrain);
-    pole.position.set(2.9, 1.5, BASE.z);
-    const flag = this.box('flag', 1.3, 0.75, 0.04, '#e5ae75', this.terrain);
-    flag.position.set(3.5, 2.7, BASE.z);
-    this.baseBeacon = this.cylinder('beacon', 0.7, 0.7, 0.8, '#a7ddcb', this.terrain, 4);
-    this.baseBeacon.material = this.material('#b1ead4', true);
-    this.baseBeacon.position.set(0, 3.6, BASE.z);
-    this.baseBeacon.rotation.z = Math.PI / 4;
-    this.shadows.addShadowCaster(this.baseCore);
+    roof.position.y = 2.5;
+    const door = this.box('camp-door', 0.8, 1.35, 0.05, '#6c7567', root);
+    door.position.set(0, 0.8, -1.82);
+    const pole = this.cylinder('flag-pole', 0.08, 0.08, 3, '#565f54', root);
+    pole.position.set(2.9, 1.5, 0);
+    const flag = this.box('flag', 1.3, 0.75, 0.04, enemy ? '#c27863' : '#83ad94', root);
+    flag.position.set(3.5, 2.7, 0);
+    const beacon = this.cylinder('beacon', 0.7, 0.7, 0.8, enemy ? '#f0b290' : '#a7ddcb', root, 4);
+    beacon.material = this.material(enemy ? '#ffc5a3' : '#b1ead4', true);
+    beacon.position.set(0, 3.6, 0);
+    beacon.rotation.z = Math.PI / 4;
+    this.camps.set(team, { root, beacon });
+    this.shadows.addShadowCaster(core);
     this.shadows.addShadowCaster(roof);
   }
 
@@ -232,10 +250,10 @@ export class BattleRenderer {
       cap.position.y = o.height + 0.02;
       root.rotation.y = o.rotation;
     } else {
-      const wall = this.box('wall', 2, 1.45, 1.65, '#d7c9ad', root);
+      const wall = this.box('wall', 2, 1.45, 1.65, o.team === 'enemy' ? '#c3a28b' : '#d7c9ad', root);
       wall.position.y = 0.72;
       for (const x of [-0.66, 0.66]) {
-        const merlon = this.box('merlon', 0.58, 0.45, 1.7, '#e4d9bf', root);
+        const merlon = this.box('merlon', 0.58, 0.45, 1.7, o.team === 'enemy' ? '#dfb89b' : '#e4d9bf', root);
         merlon.position.set(x, 1.58, 0);
       }
       if (Math.abs(o.x) > 5) root.rotation.y = Math.PI / 2;
@@ -335,7 +353,7 @@ export class BattleRenderer {
 
   render(state: State, localId: string, dt: number, menu: boolean) {
     this.elapsed += dt;
-    if (this.seed !== state.seed) this.buildLandscape(state);
+    if (this.seed !== state.seed || this.mode !== state.mode) this.buildLandscape(state);
     const lerp = 1 - Math.exp(-dt * 20);
     for (const o of state.obstacles) {
       const mesh = this.obstacles.get(o.id);
@@ -408,6 +426,7 @@ export class BattleRenderer {
         this.particle(t.x, groundHeight(t.x, t.z) + 1, t.z, t.hp / t.maxHp < 0.3 ? '#66726a' : '#a5aa99', true);
       }
       if (state.baseHp / state.baseMaxHp < 0.5) this.particle(BASE.x, 2.2, BASE.z, '#899184', true);
+      if (state.mode === 'classic' && state.enemyBaseHp > 0 && state.enemyBaseHp / state.enemyBaseMaxHp < 0.5) this.particle(ENEMY_BASE.x, 2.2, ENEMY_BASE.z, '#899184', true);
     }
     for (const p of this.particles) {
       p.life -= dt;
@@ -418,14 +437,17 @@ export class BattleRenderer {
       if (p.life <= 0) p.mesh.dispose();
     }
     this.particles = this.particles.filter(p => p.life > 0);
-    this.baseCore.scaling.y = state.baseHp > 0 ? 1 : 0.2;
-    this.baseBeacon.rotation.y += dt * 0.7;
-    this.baseBeacon.setEnabled(state.baseHp > 0);
+    for (const [team, camp] of this.camps) {
+      const hp = team === 'player' ? state.baseHp : state.enemyBaseHp;
+      camp.root.scaling.y = hp > 0 ? 1 : 0.2;
+      camp.beacon.rotation.y += dt * 0.7;
+      camp.beacon.setEnabled(hp > 0);
+    }
     this.shake = Math.max(0, this.shake - dt * 1.3);
     if (menu) {
       const a = 0.42 + Math.sin(this.elapsed * 0.045) * 0.15;
-      this.camera.position.set(Math.sin(a) * 42, 29, Math.cos(a) * 42);
-      this.camera.setTarget(new Vector3(-3, 0, 0));
+      this.camera.position.set(Math.sin(a) * 54, 36, Math.cos(a) * 58 + 8);
+      this.camera.setTarget(new Vector3(-3, 0, 10));
       this.camera.fov = 0.86;
     } else {
       const focus = this.tankVisuals.get(localId)?.root.position ?? new Vector3(BASE.x, 0, BASE.z - 7);
@@ -475,6 +497,10 @@ export class BattleRenderer {
     }
     for (const t of state.tanks) if (t.team === 'enemy' && t.hp > 0) {
       const at = segmentCircle(tank.x, tank.z, bx, bz, t.x, t.z, 0.95);
+      if (at !== null) length = Math.min(length, at * 24);
+    }
+    if (state.mode === 'classic' && state.enemyBaseHp > 0) {
+      const at = segmentCircle(tank.x, tank.z, bx, bz, ENEMY_BASE.x, ENEMY_BASE.z, ENEMY_BASE.radius);
       if (at !== null) length = Math.min(length, at * 24);
     }
     const x = tank.x + Math.sin(tank.turret) * length;

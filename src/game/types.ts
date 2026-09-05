@@ -2,6 +2,13 @@ export type Phase = 'lobby' | 'intermission' | 'battle' | 'won' | 'lost';
 
 export type Power = 'rapid' | 'burst' | 'heal' | 'armor';
 
+export type GameMode = 'classic' | 'defense';
+
+export const MODES: Record<GameMode, { name: string; description: string }> = {
+  classic: { name: '经典模式', description: '守住己方营地，攻破敌军阵地' },
+  defense: { name: '防守模式', description: '守护营地，击退五波来袭敌军' },
+};
+
 export interface Input {
   moveX: number;
   moveZ: number;
@@ -41,6 +48,7 @@ export interface Obstacle {
   hp: number;
   maxHp: number;
   rotation: number;
+  team?: Tank['team'];
 }
 
 export interface Shell {
@@ -70,13 +78,15 @@ export interface BattleEvent {
   z: number;
   size: number;
   owner?: string;
+  power?: Power;
 }
 
-export const PROTOCOL_VERSION = 2;
+export const PROTOCOL_VERSION = 3;
 
 export interface State {
   version: typeof PROTOCOL_VERSION;
   seed: number;
+  mode: GameMode;
   time: number;
   phase: Phase;
   paused: boolean;
@@ -85,6 +95,8 @@ export interface State {
   remaining: number;
   baseHp: number;
   baseMaxHp: number;
+  enemyBaseHp: number;
+  enemyBaseMaxHp: number;
   tanks: Tank[];
   obstacles: Obstacle[];
   shells: Shell[];
@@ -94,9 +106,13 @@ export interface State {
 
 export const EMPTY_INPUT: Input = { moveX: 0, moveZ: 0, aim: Math.PI, fire: false };
 
-export const BASE = { x: 0, z: 23, radius: 2.2 };
+export const BASE = { x: 0, z: 37, radius: 2.2 };
 
-export const ARENA = { x: 27, z: 32 };
+export const ENEMY_BASE = { x: 0, z: -37, radius: 2.2 };
+
+export const PLAYER_SPAWN_Z = BASE.z - 9;
+
+export const ARENA = { x: 36, z: 48 };
 
 export const WAVES = 5;
 
@@ -105,6 +121,14 @@ export const COLORS = ['#59847a', '#dfb265', '#7097b5', '#af829b'];
 export const POWER_LABELS: Record<Power, string> = {
   rapid: '快速装填', burst: '三连发', heal: '战地维修', armor: '强化装甲',
 };
+
+export const POWER_EFFECTS: Record<Power, string> = {
+  rapid: '装填加快 · 12 秒', burst: '三枚连射 · 10 秒', heal: '恢复 35% 血量', armor: '受到伤害降低 30% · 12 秒',
+};
+
+export function pickupHint(kind: Power, tank: Tank) {
+  return kind === 'heal' && tank.hp >= tank.maxHp ? '满血无需维修 · 受伤后拾取' : POWER_EFFECTS[kind];
+}
 
 export const clamp = (value: number, min: number, max: number) => Math.max(min, Math.min(max, value));
 

@@ -9,9 +9,14 @@ test('桌面真实三维渲染、驾驶、炮击和暂停', async ({ page }) => 
   await expect(page.locator('#soloButton')).toBeVisible();
   await page.waitForFunction(() => (window as any).__tankBattle?.fps > 0);
   await page.screenshot({ path: 'artifacts/desktop-menu.png' });
+  await expect(page.locator('#modeClassic')).toHaveAttribute('aria-pressed', 'true');
+  await page.locator('#modeDefense').click();
+  await expect(page.locator('#modeDefense')).toHaveAttribute('aria-pressed', 'true');
   await page.getByRole('button', { name: '开始单人战役' }).click();
   await expect(page.locator('#hud')).toBeVisible();
   await expect.poll(() => page.evaluate(() => (window as any).__tankBattle.state.phase)).toBe('battle');
+  expect(await page.evaluate(() => (window as any).__tankBattle.state.mode)).toBe('defense');
+  await expect(page.locator('#enemyBaseCard')).toBeHidden();
   await expect.poll(() => page.evaluate(() => (window as any).__tankBattle.camera.position.y)).toBeGreaterThan(11);
   const initial = await page.evaluate(() => (window as any).__tankBattle.state.tanks[0]);
   // 只按左键就应产生横向位移，不依赖前进键，炮塔仍对准原来的瞄准方向。
@@ -62,6 +67,10 @@ test('手机竖屏、横屏和双拇指输入', async ({ browser }) => {
   await page.locator('#soloButton').tap();
   await expect(page.locator('#joystick')).toBeVisible();
   await expect.poll(() => page.evaluate(() => (window as any).__tankBattle.state.phase)).toBe('battle');
+  expect(await page.evaluate(() => (window as any).__tankBattle.state.mode)).toBe('classic');
+  await expect(page.locator('#enemyBaseCard')).toBeVisible();
+  await expect(page.locator('#enemyBaseHp')).toHaveText('600 / 600');
+  await expect(page.locator('#pickupLabels [data-power="heal"]')).toContainText('满血无需维修');
   await expect.poll(() => page.evaluate(() => (window as any).__tankBattle.camera.position.y)).toBeGreaterThan(13);
   const before = await page.evaluate(() => (window as any).__tankBattle.state.tanks[0]);
   const cdp = await context.newCDPSession(page);
@@ -117,12 +126,14 @@ test('手机创建房间，第二位玩家通过真实 WebRTC 同步战场', asy
   await host.locator('#playerName').fill('房主坦克');
   await host.locator('#hostButton').tap();
   await expect(host.locator('#lobbyDialog')).toBeVisible({ timeout: 25000 });
+  await expect(host.locator('#lobbyMode')).toContainText('经典模式');
   const code = (await host.locator('#roomCode').textContent())!;
   expect(code).toMatch(/^[A-Z2-9]{6}$/);
   await host.screenshot({ path: 'artifacts/mobile-lobby.png' });
   await guest.goto('./?room=' + code);
   await guest.locator('#connectButton').tap();
   await expect(guest.locator('#lobbyDialog')).toBeVisible({ timeout: 45000 });
+  await expect(guest.locator('#lobbyMode')).toContainText('经典模式');
   await guest.locator('#readyButton').tap();
   await expect(host.locator('#startRoom')).toBeEnabled();
   await host.locator('#startRoom').tap();
@@ -132,6 +143,9 @@ test('手机创建房间，第二位玩家通过真实 WebRTC 同步战场', asy
   const hostState = await host.evaluate(() => (window as any).__tankBattle.state);
   const guestState = await guest.evaluate(() => (window as any).__tankBattle.state);
   expect(hostState.seed).toBe(guestState.seed);
+  expect(hostState.mode).toBe('classic');
+  expect(guestState.mode).toBe(hostState.mode);
+  expect(guestState.enemyBaseHp).toBe(hostState.enemyBaseHp);
   expect(hostState.obstacles).toEqual(guestState.obstacles);
   const guestBefore = await guest.evaluate(() => {
     const d = (window as any).__tankBattle;
