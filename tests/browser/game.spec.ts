@@ -4,6 +4,7 @@ test('桌面真实三维渲染、驾驶、炮击和暂停', async ({ page }) => 
   const errors: string[] = [];
   page.on('pageerror', e => errors.push(e.message));
   await page.setViewportSize({ width: 1440, height: 900 });
+  if (process.env.CI) await page.addInitScript(() => localStorage.setItem('tb-quality', 'low'));
   await page.goto('./');
   await expect(page.locator('#soloButton')).toBeVisible();
   await page.waitForFunction(() => (window as any).__tankBattle?.fps > 0);

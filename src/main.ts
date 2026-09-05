@@ -411,7 +411,8 @@ function updateHud() {
 
 renderer.engine.runRenderLoop(() => {
   const now = performance.now();
-  const dt = Math.min(0.1, (now - previousFrame) / 1000);
+  // 固定步长保持碰撞稳定；低帧率允许有限补帧，后台长时间停顿仍不会一次推进整局。
+  const dt = Math.min(0.25, (now - previousFrame) / 1000);
   previousFrame = now;
   fps = dt > 0 ? fps * 0.95 + (1 / dt) * 0.05 : fps;
   if (screen === 'game') {
