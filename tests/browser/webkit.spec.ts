@@ -1,0 +1,26 @@
+import { test, expect } from '@playwright/test';
+
+test('WebKit 手机画面、设置和单人战役', async ({ browser, browserName }) => {
+  test.skip(browserName !== 'webkit', '单独使用 WebKit 引擎验证');
+  const context = await browser.newContext({ viewport: { width: 390, height: 844 }, isMobile: true, hasTouch: true, deviceScaleFactor: 1 });
+  const page = await context.newPage();
+  const errors: string[] = [];
+  page.on('pageerror', e => errors.push(e.message));
+  await page.goto('./');
+  await expect(page.locator('#soloButton')).toBeVisible();
+  await page.waitForFunction(() => (window as any).__tankBattle?.fps > 0);
+  await page.locator('#settingsButton').tap();
+  await page.locator('#quality').selectOption('low');
+  await page.locator('#settingsDone').tap();
+  await page.locator('#soloButton').tap();
+  await expect(page.locator('#hud')).toBeVisible();
+  await expect.poll(() => page.evaluate(() => (window as any).__tankBattle.state.phase), { timeout: 15000 }).toBe('battle');
+  await expect(page.locator('#fireButton')).toBeVisible();
+  await page.screenshot({ path: 'artifacts/webkit-mobile.png' });
+  await page.locator('#pauseButton').tap();
+  await expect(page.locator('#pauseDialog')).toBeVisible();
+  await page.locator('#backMenu').tap();
+  await expect(page.locator('#soloButton')).toBeVisible();
+  expect(errors).toEqual([]);
+  await context.close();
+});

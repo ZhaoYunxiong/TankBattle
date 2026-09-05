@@ -1,0 +1,62 @@
+name: 验证并部署山谷守卫
+
+on:
+  push:
+    branches: [main]
+  workflow_dispatch:
+
+permissions:
+  contents: read
+  pages: write
+  id-token: write
+
+concurrency:
+  group: pages
+  cancel-in-progress: true
+
+jobs:
+  build:
+    runs-on: ubuntu-latest
+    steps:
+      - name: 拉取源代码
+        uses: actions/checkout@v4
+      - name: 配置 Node.js
+        uses: actions/setup-node@v4
+        with:
+          node-version: '24'
+          cache: npm
+      - name: 安装依赖
+        run: npm ci
+      - name: 验证战斗规则
+        run: npm test
+      - name: 安装浏览器
+        run: npx playwright install --with-deps chromium
+      - name: 验证桌面与手机交互
+        run: npm run test:e2e -- --grep "桌面|竖屏"
+      - name: 构建网页
+        run: npm run build
+      - name: 配置 GitHub Pages
+        uses: actions/configure-pages@v5
+      - name: 上传站点
+        uses: actions/upload-pages-artifact@v3
+        with:
+          path: dist
+      - name: 保存界面验证截图
+        if: always()
+        uses: actions/upload-artifact@v4
+        with:
+          name: browser-checks
+          path: |
+            artifacts/
+            test-results/
+          retention-days: 7
+  deploy:
+    needs: build
+    runs-on: ubuntu-latest
+    environment:
+      name: github-pages
+      url: https://zhaoyunxiong.github.io/TankBattle/
+    steps:
+      - name: 发布到 GitHub Pages
+        id: deployment
+        uses: actions/deploy-pages@v4

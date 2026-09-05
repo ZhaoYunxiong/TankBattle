@@ -1,0 +1,117 @@
+dialog { border: 1px solid #72826440; padding: 0; border-radius: 18px; background: #f3f0e5; color: #324c43; box-shadow: 0 25px 100px #22372c35; width: min(440px, calc(100vw - 32px)); max-height: calc(100dvh - 32px); overflow-y: auto; }
+dialog::backdrop { background: #43584650; backdrop-filter: blur(7px); }
+.dialog-content { padding: 30px; }
+.dialog-header { display: flex; align-items: center; justify-content: space-between; gap: 15px; }
+.dialog-header h2 { margin: 0; font-family: "Songti SC", "SimSun", serif; font-weight: 500; font-size: 27px; letter-spacing: 3px; }
+.dialog-content p { font-size: 12px; line-height: 1.9; color: #7d8673; }
+.dialog-content .primary, .dialog-content .secondary { width: 100%; margin-top: 12px; }
+.dialog-content label { display: block; font-size: 12px; line-height: 1.8; }
+.room-input { display: block; width: 100%; border: 1px solid #71826950; border-radius: 8px; background: #fcfaef; padding: 14px; text-transform: uppercase; text-align: center; letter-spacing: 7px; font-size: 24px; color: #486959; margin: 18px 0; }
+.room-code { display: flex; align-items: center; justify-content: space-between; gap: 18px; padding: 17px 0; margin-top: 12px; border-top: 1px solid #72826430; border-bottom: 1px solid #72826430; }
+.room-code small { display: block; font-size: 10px; color: #7d8673; letter-spacing: 2px; }
+.room-code strong { display: block; font-size: 30px; letter-spacing: 5px; font-weight: 500; margin-top: 6px; }
+.room-code img { width: 100px; height: 100px; border: 5px solid #fff; border-radius: 8px; }
+.players { margin: 16px 0; }
+.player-slot { display: flex; align-items: center; gap: 10px; padding: 12px 0; border-bottom: 1px solid #72826420; font-size: 13px; }
+.player-slot i { display: block; width: 11px; height: 11px; border-radius: 4px; }
+.player-slot small { margin-left: auto; color: #809074; font-size: 10px; }
+.player-slot.empty { color: #a0a590; }
+.setting { padding: 15px 0; display: flex !important; justify-content: space-between; align-items: center; gap: 14px; border-bottom: 1px solid #71826426; }
+.setting select { padding: 8px; color: #405d4b; border: 1px solid #72826450; border-radius: 7px; background: #f9f7ed; }
+.setting input { accent-color: #496958; width: 20px; height: 20px; }
+.help-table { width: 100%; border-collapse: collapse; font-size: 12px; line-height: 1.8; margin-top: 15px; }
+.help-table td { padding: 8px 0; border-bottom: 1px solid #72826425; }
+.help-table td:first-child { width: 42%; color: #7d8673; }
+.result-emblem { width: 64px; height: 64px; border-radius: 50%; background: #d6ddc9; display: grid; place-items: center; margin: 0 auto 18px; font-size: 30px; }
+.result { text-align: center; }
+.result h2 { font-family: "Songti SC", serif; font-size: 33px; font-weight: 400; letter-spacing: 4px; margin: 8px; }
+.result-stats { display: flex; justify-content: space-around; padding: 17px 0; border-block: 1px solid #71826430; margin: 20px 0; }
+.result-stats b { display: block; font-size: 24px; font-weight: 500; }
+.result-stats small { display: block; font-size: 10px; margin-top: 6px; color: #7c8772; }
+.hud { position: absolute; inset: 0; color: #f5f2e4; }
+.hud-top { position: absolute; left: max(25px, env(safe-area-inset-left)); right: max(25px, env(safe-area-inset-right)); top: max(21px, env(safe-area-inset-top)); display: flex; align-items: flex-start; justify-content: space-between; gap: 14px; }
+.glass { background: #344b40bf; border: 1px solid #f4f1d32f; backdrop-filter: blur(9px); box-shadow: 0 5px 22px #2e423317; }
+.camp-card { width: 196px; padding: 13px 16px; border-radius: 11px; }
+.hud-caption { display: flex; justify-content: space-between; align-items: center; gap: 13px; font-size: 10px; letter-spacing: 1.5px; }
+.hud-caption b { font-weight: 500; letter-spacing: 0; }
+.bar { height: 5px; border-radius: 4px; background: #eeecd029; margin-top: 9px; overflow: hidden; }
+.bar > i { display: block; width: 100%; height: 100%; background: #c1d4a5; transition: width .15s; border-radius: inherit; }
+.wave { text-align: center; text-shadow: 0 2px 10px #3e5342a0; padding-top: 3px; }
+.wave span { font-size: 10px; letter-spacing: 3px; }
+.wave b { display: block; font-size: 23px; font-weight: 500; letter-spacing: 4px; margin-top: 6px; }
+.wave small { display: block; margin-top: 7px; font-size: 10px; letter-spacing: 1px; }
+.hud-tools { display: flex; gap: 8px; }
+.hud-tools .icon-button { background: #344b40b8; border-color: #fff9; color: #f2efdd; }
+.radar { position: absolute; top: max(89px, calc(env(safe-area-inset-top) + 68px)); right: max(25px, env(safe-area-inset-right)); width: 130px; border-radius: 13px; padding: 8px; }
+.radar canvas { width: 100%; display: block; }
+.radar span { display: block; text-align: center; font-size: 8px; letter-spacing: 2px; margin-top: 3px; color: #ecebd0ab; }
+.player-card { position: absolute; bottom: max(33px, env(safe-area-inset-bottom)); left: max(27px, env(safe-area-inset-left)); width: 235px; border-radius: 12px; padding: 16px; }
+.player-card .bar { height: 7px; }
+.player-detail { display: flex; justify-content: space-between; font-size: 10px; margin-top: 12px; color: #e4e6c9c0; }
+.player-detail strong { font-weight: 400; color: #fff8df; }
+.buffs { position: absolute; bottom: max(150px, calc(env(safe-area-inset-bottom) + 120px)); left: max(27px, env(safe-area-inset-left)); display: flex; gap: 7px; flex-wrap: wrap; }
+.buff { display: flex; align-items: center; gap: 7px; padding: 7px 10px; border-radius: 6px; background: #375245ce; color: #fff0c6; border: 1px solid #cfdbba50; font-size: 10px; }
+.keyboard-help { position: absolute; bottom: 30px; left: 50%; transform: translateX(-50%); text-align: center; font-size: 10px; letter-spacing: 1px; line-height: 2.1; color: #fffbe4c9; text-shadow: 0 1px 5px #3b5239; }
+.weapon-card { position: absolute; right: 30px; bottom: 32px; width: 148px; padding: 15px; border-radius: 10px; }
+.weapon-card b { font-size: 15px; font-weight: 500; }
+.weapon-card small { display: block; font-size: 9px; letter-spacing: 1px; margin-top: 5px; }
+.crosshair { position: absolute; width: 26px; height: 26px; border: 1px solid #fff6ccdc; border-radius: 50%; transform: translate(-50%, -50%); box-shadow: 0 0 0 1px #39554165; }
+.crosshair::before, .crosshair::after { content: ''; position: absolute; background: #fff7d9; }
+.crosshair::before { width: 5px; height: 5px; left: calc(50% - 2.5px); top: calc(50% - 2.5px); border-radius: 50%; }
+.crosshair::after { width: 1px; height: 8px; left: calc(50% - .5px); top: -5px; }
+.objective { position: absolute; top: 29%; left: 50%; transform: translateX(-50%); width: min(80vw, 450px); text-align: center; text-shadow: 0 2px 15px #344d39; }
+.objective b { display: block; font-family: "Songti SC", serif; font-size: 30px; letter-spacing: 4px; font-weight: 500; }
+.objective small { display: block; font-size: 12px; margin-top: 12px; line-height: 1.8; }
+.enemy-label { position: absolute; width: 46px; transform: translate(-50%, -50%); font-size: 9px; text-align: center; text-shadow: 0 1px 3px #304c3a; color: #fcf0d6; }
+.enemy-label .bar { height: 3px; margin-top: 4px; }
+.enemy-label .bar i { background: #e2a084; }
+.touch-controls { display: none; position: absolute; inset: 0; }
+#joystick { position: absolute; bottom: max(38px, env(safe-area-inset-bottom)); left: max(29px, env(safe-area-inset-left)); width: 122px; height: 122px; border-radius: 50%; border: 1px solid #faf4d769; background: #314d3f27; box-shadow: inset 0 0 0 18px #e8efd50a; display: grid; place-items: center; pointer-events: auto; touch-action: none; }
+#joystick > span { display: block; width: 49px; height: 49px; border-radius: 50%; background: #f0efd17a; border: 1px solid #fff8d69c; pointer-events: none; }
+#fireButton { position: absolute; bottom: max(47px, env(safe-area-inset-bottom)); right: max(31px, env(safe-area-inset-right)); width: 89px; height: 89px; border: 1px solid #f6e6b492; border-radius: 50%; background: #ede5bf44; color: #fff7d6; display: flex; flex-direction: column; align-items: center; justify-content: center; gap: 6px; touch-action: none; }
+#fireButton svg { width: 31px; height: 31px; }
+#fireButton small { font-size: 9px; letter-spacing: 2px; }
+#fireButton.pressed { background: #f5db9975; transform: scale(.96); }
+.camera-buttons { position: absolute; bottom: 151px; right: max(35px, env(safe-area-inset-right)); display: flex; gap: 6px; }
+.camera-buttons .icon-button { width: 36px; height: 36px; background: #344b4070; color: #fff4d9; border-color: #fff6; font-size: 12px; }
+.camera-buttons .active { background: #d3bb79b0; }
+.connection-status { position: absolute; top: 119px; left: 50%; transform: translateX(-50%); padding: 7px 13px; border-radius: 6px; background: #856951d9; font-size: 11px; max-width: 80%; text-align: center; }
+@media (pointer: coarse) {
+  .touch-controls { display: block; }
+  .keyboard-help, .weapon-card { display: none; }
+  .player-card { left: 27px; bottom: 175px; width: 180px; padding: 10px 12px; }
+  .player-detail { margin-top: 8px; font-size: 9px; }
+  .buffs { bottom: 264px; max-width: 180px; }
+}
+@media (max-width: 600px) {
+  .hud-top { left: 15px; right: 15px; top: max(15px, env(safe-area-inset-top)); gap: 8px; }
+  .camp-card { width: 139px; padding: 11px; }
+  .hud-caption { font-size: 9px; letter-spacing: .5px; gap: 6px; }
+  .wave span { font-size: 8px; letter-spacing: 1.5px; }
+  .wave b { font-size: 17px; letter-spacing: 1px; }
+  .wave small { font-size: 8px; }
+  .hud-tools .icon-button { width: 35px; height: 35px; }
+  .hud-tools .fullscreen-button { display: none; }
+  .radar { right: 15px; top: 92px; width: 91px; padding: 5px; }
+  .radar span { font-size: 7px; letter-spacing: 1px; }
+  .player-card { left: 23px; width: 165px; }
+  .buffs { left: 23px; }
+  .dialog-content { padding: 23px; }
+  .objective { top: 32%; }
+  .objective b { font-size: 25px; }
+  .connection-status { top: 191px; }
+}
+@media (max-height: 540px) and (orientation: landscape) {
+  .hud-top { top: max(10px, env(safe-area-inset-top)); }
+  .camp-card { padding: 9px 12px; width: 169px; }
+  .wave b { font-size: 18px; }
+  .radar { top: 70px; right: max(20px, env(safe-area-inset-right)); width: 90px; }
+  #joystick { bottom: max(20px, env(safe-area-inset-bottom)); width: 103px; height: 103px; }
+  #fireButton { bottom: max(25px, env(safe-area-inset-bottom)); width: 77px; height: 77px; }
+  .camera-buttons { bottom: 114px; right: max(118px, env(safe-area-inset-right)); }
+  .player-card { bottom: 24px; left: 154px; width: 160px; padding: 10px; }
+  .buffs { bottom: 104px; left: 150px; max-width: 250px; }
+  .objective { top: 31%; }
+  .objective b { font-size: 24px; }
+  .connection-status { top: 99px; }
+}
