@@ -18,7 +18,7 @@ try {
   await page.screenshot({ path: 'artifacts/published-menu.png' });
   await page.locator('#soloButton').tap();
   await page.locator('#hud').waitFor({ state: 'visible' });
-  await page.waitForTimeout(5500);
+  await page.waitForFunction(() => /敌军/.test(document.querySelector('#enemyCount')?.textContent || ''), null, { timeout: 20000 });
   assert.match(await page.locator('#enemyCount').textContent(), /敌军/);
   assert.equal(await page.evaluate(() => document.documentElement.scrollWidth <= innerWidth), true);
   await page.screenshot({ path: 'artifacts/published-battle.png' });
@@ -36,7 +36,7 @@ try {
   await guest.locator('#readyButton').tap();
   await page.locator('#startRoom').tap();
   await guest.locator('#hud').waitFor({ state: 'visible' });
-  await guest.waitForTimeout(4000);
+  await guest.waitForFunction(() => /敌军/.test(document.querySelector('#enemyCount')?.textContent || ''), null, { timeout: 20000 });
   assert.match(await guest.locator('#enemyCount').textContent(), /敌军/);
   await guest.screenshot({ path: 'artifacts/published-multiplayer.png' });
   assert.deepEqual(errors, []);

@@ -13,7 +13,8 @@ test('桌面真实三维渲染、驾驶、炮击和暂停', async ({ page }) => 
   await expect.poll(() => page.evaluate(() => (window as any).__tankBattle.state.phase)).toBe('battle');
   const before = await page.evaluate(() => (window as any).__tankBattle.state.tanks[0].z);
   await page.keyboard.down('KeyW');
-  await page.waitForTimeout(1000);
+  // 等待实际移动结果，避免 CI 软件渲染速度影响固定墙钟延迟的断言。
+  await expect.poll(() => page.evaluate(() => (window as any).__tankBattle.state.tanks[0].z)).toBeLessThan(before - 1.5);
   await page.keyboard.up('KeyW');
   const after = await page.evaluate(() => (window as any).__tankBattle.state.tanks[0].z);
   expect(after).toBeLessThan(before - 1);
@@ -44,7 +45,7 @@ test('手机竖屏、横屏和双拇指输入', async ({ browser }) => {
   expect(await page.evaluate(() => document.documentElement.scrollWidth <= innerWidth)).toBe(true);
   await page.locator('#soloButton').tap();
   await expect(page.locator('#joystick')).toBeVisible();
-  await page.waitForTimeout(3500);
+  await expect.poll(() => page.evaluate(() => (window as any).__tankBattle.state.phase)).toBe('battle');
   const before = await page.evaluate(() => (window as any).__tankBattle.state.tanks[0].z);
   const cdp = await context.newCDPSession(page);
   const stick = (await page.locator('#joystick').boundingBox())!;
@@ -53,7 +54,7 @@ test('手机竖屏、横屏和双拇指输入', async ({ browser }) => {
   const right = { x: fire.x + fire.width / 2, y: fire.y + fire.height / 2, id: 2 };
   await cdp.send('Input.dispatchTouchEvent', { type: 'touchStart', touchPoints: [left] });
   await cdp.send('Input.dispatchTouchEvent', { type: 'touchStart', touchPoints: [left, right] });
-  await page.waitForTimeout(1000);
+  await expect.poll(() => page.evaluate(() => (window as any).__tankBattle.state.tanks[0].z)).toBeLessThan(before - 1.5);
   await cdp.send('Input.dispatchTouchEvent', { type: 'touchMove', touchPoints: [left, { ...right, x: right.x - 45 }] });
   await page.waitForTimeout(400);
   await cdp.send('Input.dispatchTouchEvent', { type: 'touchEnd', touchPoints: [] });
