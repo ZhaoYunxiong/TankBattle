@@ -2,6 +2,7 @@ import './style.css';
 import QRCode from 'qrcode';
 import { Simulation } from './game/simulation';
 import { BattleRenderer } from './game/renderer';
+import { CAMERA } from './game/camera';
 import { Controls } from './controls';
 import { Rooms } from './network';
 import { BASE, COLORS, groundHeight, POWER_LABELS, WAVES, type Power, type State } from './game/types';
@@ -31,7 +32,7 @@ get('app').innerHTML = '<main id="menu" class="menu-screen">' +
   '<div class="scene-label"><span>CAMPAIGN / 01</span><b>薄雾山谷</b><p>山林之间，营地长明。</p></div><footer class="menu-footer"><button id="helpButton" class="help-link">操作手册 ↗</button><span>为每一位童年的坦克手</span><a href="https://github.com/ZhaoYunxiong/TankBattle" target="_blank" rel="noreferrer">GITHUB ↗</a></footer></main>' +
   '<section id="hud" class="hud" hidden><div class="hud-top"><div class="camp-card glass"><div class="hud-caption"><span>⌂ 营地核心</span><b id="baseHp">600 / 600</b></div><div class="bar"><i id="baseBar"></i></div></div><div class="wave"><span>守卫薄雾山谷</span><b id="wave">01 / 05</b><small id="enemyCount">准备出击</small></div><div class="hud-tools"><button id="pauseButton" class="icon-button" aria-label="暂停">' + icon('pause') + '</button><button class="icon-button fullscreen-button" aria-label="全屏">' + icon('fullscreen') + '</button></div></div>' +
   '<div class="radar glass"><canvas id="radar" width="160" height="160" aria-label="战场小地图"></canvas><span id="roomBadge">单人战役 · N ↑</span></div><div class="player-card glass"><div class="hud-caption"><span id="tankName">守卫者</span><b id="tankHp">120 / 120</b></div><div class="bar"><i id="tankBar"></i></div><div class="player-detail"><span id="damageStatus">装甲完好</span><strong id="lives">备用 × 2</strong></div><div class="player-detail"><span>战役得分</span><strong id="score">0000</strong></div></div>' +
-  '<div id="buffs" class="buffs"></div><div class="keyboard-help">W S 驾驶 · A D 转向 · 鼠标瞄准 · 按住左键开火<br>单击战场锁定鼠标 · Alt 自由观察 · C 镜头归位 · Esc 暂停</div><div class="weapon-card glass"><b id="weaponStatus">炮弹就绪</b><small>标准炮 · 按住连续射击</small><div class="bar"><i id="reloadBar"></i></div></div><div id="crosshair" class="crosshair"></div><div id="enemyLabels"></div><div id="objective" class="objective" hidden></div><div id="connectionStatus" class="connection-status" hidden></div>' +
+  '<div id="buffs" class="buffs"></div><div class="keyboard-help">W A S D / 方向键移动 · 鼠标瞄准 · 按住左键开火<br>单击战场锁定鼠标 · Alt 自由观察 · C 镜头归位 · Esc 暂停</div><div class="weapon-card glass"><b id="weaponStatus">炮弹就绪</b><small>标准炮 · 按住连续射击</small><div class="bar"><i id="reloadBar"></i></div></div><div id="crosshair" class="crosshair"></div><div id="enemyLabels"></div><div id="objective" class="objective" hidden></div><div id="connectionStatus" class="connection-status" hidden></div>' +
   '<div class="touch-controls"><div id="joystick" role="group" aria-label="驾驶摇杆"><span></span></div><button id="fireButton" aria-label="按住开火并拖动瞄准">' + icon('target') + '<small id="touchReload">开火</small></button><div class="camera-buttons"><button id="zoomIn" class="icon-button" aria-label="拉近镜头">＋</button><button id="zoomOut" class="icon-button" aria-label="拉远镜头">−</button><button id="freeLook" class="icon-button" aria-label="切换自由观察">' + icon('camera') + '</button></div></div></section>' +
   '<div id="toast" role="status" aria-live="polite" hidden></div>' +
   '<dialog id="joinDialog"><div class="dialog-content"><div class="dialog-header"><h2>加入小队</h2><button class="icon-button" data-close="joinDialog" aria-label="关闭">' + icon('close') + '</button></div><p>输入朋友分享的房间号。所有人都可以用手机开房或加入，房主需保持游戏在前台。</p><label for="roomInput">六位房间号</label><input id="roomInput" class="room-input" maxlength="6" autocomplete="off" autocapitalize="characters" spellcheck="false" placeholder="ABC234"><button id="connectButton" class="primary">加入房间</button><p id="joinStatus" role="status">同一 Wi-Fi 更容易直连。跨网络连接取决于网络环境。</p></div></dialog>' +
@@ -39,7 +40,7 @@ get('app').innerHTML = '<main id="menu" class="menu-screen">' +
   '<dialog id="settingsDialog"><div class="dialog-content"><div class="dialog-header"><h2>游戏设置</h2><button id="closeSettings" class="icon-button" aria-label="关闭设置">' + icon('close') + '</button></div><label class="setting"><span>画面质量</span><select id="quality"><option value="auto">自动平衡</option><option value="low">省电流畅</option><option value="high">细腻画面</option></select></label><label class="setting"><span>炮击与爆炸震动</span><input id="shake" type="checkbox"></label><label class="setting"><span>战场音效</span><input id="sound" type="checkbox"></label><p>手机发热或画面卡顿时，可选择省电流畅。横屏拥有更宽的战场视野，竖屏同样可以游玩。</p><button id="settingsDone" class="primary">完成</button></div></dialog>' +
   '<dialog id="pauseDialog"><div class="dialog-content"><div class="dialog-header"><h2>稍作休整</h2></div><p id="pauseText">战场已暂停，准备好后继续出发。</p><button id="resumeButton" class="primary">继续战斗</button><button id="pauseSettings" class="secondary">游戏设置</button><button id="backMenu" class="text-button">返回大厅</button></div></dialog>' +
   '<dialog id="resultDialog"><div class="dialog-content result"><div class="result-emblem" id="resultEmblem">◇</div><h2 id="resultTitle">山谷依旧长明</h2><p id="resultDescription"></p><div class="result-stats"><div><b id="resultScore">0</b><small>小队得分</small></div><div><b id="resultWave">0</b><small>抵达波次</small></div><div><b id="resultTime">0:00</b><small>守卫时间</small></div></div><button id="retryButton" class="primary">再次出征</button><button id="resultMenu" class="text-button">返回大厅</button></div></dialog>' +
-  '<dialog id="helpDialog"><div class="dialog-content"><div class="dialog-header"><h2>坦克手册</h2><button class="icon-button" data-close="helpDialog" aria-label="关闭手册">' + icon('close') + '</button></div><p>守住营地，击退五波来袭敌军。坦克被击毁后可使用两辆备用坦克，营地核心被毁则战役结束。</p><table class="help-table"><tr><td>电脑驾驶</td><td>W/S 前进后退，A/D 转向</td></tr><tr><td>电脑瞄准</td><td>单击战场锁定鼠标；拖动/鼠标移动瞄准，左键或空格开火</td></tr><tr><td>自由镜头</td><td>滚轮缩放，Alt 只观察，C 归位</td></tr><tr><td>手机操作</td><td>左摇杆驾驶，右侧拖动瞄准；按住开火按钮也能拖动</td></tr><tr><td>受损坦克</td><td>低于 60% 开始冒烟、减速、散布增加；维修后恢复</td></tr><tr><td>战术破坏</td><td>炸开树木和岩壁开辟捷径，敌军也能利用缺口</td></tr><tr><td>战场补给</td><td>绿：回血；黄：快装；橙：连发；蓝：减伤</td></tr></table><p>合作模式没有队友伤害，也不会误伤营地围墙。跨网络直连可能受运营商限制；同一可互访 Wi-Fi 下更适合一起游玩。</p></div></dialog>';
+  '<dialog id="helpDialog"><div class="dialog-content"><div class="dialog-header"><h2>坦克手册</h2><button class="icon-button" data-close="helpDialog" aria-label="关闭手册">' + icon('close') + '</button></div><p>守住营地，击退五波来袭敌军。坦克被击毁后可使用两辆备用坦克，营地核心被毁则战役结束。</p><table class="help-table"><tr><td>电脑驾驶</td><td>WASD / 方向键按镜头方向移动，车身自动转向</td></tr><tr><td>电脑瞄准</td><td>单击战场锁定鼠标；拖动/鼠标移动瞄准，左键或空格开火</td></tr><tr><td>自由镜头</td><td>滚轮缩放，Alt 只观察，C 归位</td></tr><tr><td>手机操作</td><td>左摇杆推向哪里就往哪里走，右侧拖动瞄准；按住开火按钮也能拖动</td></tr><tr><td>受损坦克</td><td>低于 60% 开始冒烟、减速、散布增加；维修后恢复</td></tr><tr><td>战术破坏</td><td>炸开树木和岩壁开辟捷径，敌军也能利用缺口</td></tr><tr><td>战场补给</td><td>绿：回血；黄：快装；橙：连发；蓝：减伤</td></tr></table><p>合作模式没有队友伤害，也不会误伤营地围墙。跨网络直连可能受运营商限制；同一可互访 Wi-Fi 下更适合一起游玩。</p></div></dialog>';
 
 let renderer: BattleRenderer;
 try {
@@ -117,8 +118,8 @@ function enterGame() {
   controls.freeLook = false;
   get('freeLook').classList.remove('active');
   renderer.yaw = state.tanks.find(t => t.id === localId)?.turret ?? Math.PI;
-  renderer.zoom = 11.5;
-  renderer.pitch = 0.48;
+  renderer.zoom = CAMERA.zoom;
+  renderer.pitch = CAMERA.pitch;
   closeDialogs();
   get('menu').hidden = true;
   get('hud').hidden = false;
@@ -126,7 +127,7 @@ function enterGame() {
   previousBaseHp = state.baseHp;
   previousDropEvent = state.events.at(-1)?.id ?? 0;
   renderer.audio.unlock();
-  toast(matchMedia('(pointer: coarse)').matches ? '左摇杆驾驶，右侧拖动瞄准。按住开火可同时拖动。' : '单击战场控制镜头，W/S 驾驶，A/D 转向。守住营地！', 5500);
+  toast(matchMedia('(pointer: coarse)').matches ? '左摇杆推向哪里就往哪里走，右侧拖动瞄准。按住开火可同时拖动。' : '单击战场控制镜头，WASD 按镜头方向移动，车身自动转向。守住营地！', 5500);
 }
 
 function newSolo() {
@@ -278,7 +279,11 @@ get('copyRoom').onclick = async () => {
 };
 get('pauseButton').onclick = () => pause();
 controls.onPause = () => pause();
-controls.onRecenter = () => { renderer.yaw = state.tanks.find(t => t.id === localId)?.angle ?? Math.PI; renderer.pitch = 0.48; };
+controls.onRecenter = () => {
+  renderer.yaw = state.tanks.find(t => t.id === localId)?.angle ?? Math.PI;
+  renderer.pitch = CAMERA.pitch;
+  renderer.zoom = CAMERA.zoom;
+};
 get('resumeButton').onclick = resume;
 get('backMenu').onclick = menu;
 get('resultMenu').onclick = menu;
@@ -302,8 +307,8 @@ get('freeLook').onclick = () => {
   get('freeLook').classList.toggle('active', controls.freeLook);
   toast(controls.freeLook ? '自由观察：炮塔保持方向。再次点击相机恢复瞄准。' : '已恢复炮塔跟随镜头。', 2500);
 };
-get('zoomIn').onclick = () => { renderer.zoom = Math.max(6, renderer.zoom - 2); };
-get('zoomOut').onclick = () => { renderer.zoom = Math.min(19, renderer.zoom + 2); };
+get('zoomIn').onclick = () => { renderer.zoom = Math.max(CAMERA.minZoom, renderer.zoom - 2); };
+get('zoomOut').onclick = () => { renderer.zoom = Math.min(CAMERA.maxZoom, renderer.zoom + 2); };
 document.querySelectorAll<HTMLElement>('[data-close]').forEach(b => b.onclick = () => get<HTMLDialogElement>(b.dataset.close!).close());
 document.querySelectorAll<HTMLDialogElement>('dialog').forEach(d => d.addEventListener('cancel', e => {
   if (['lobbyDialog', 'resultDialog'].includes(d.id)) { e.preventDefault(); return; }
@@ -467,5 +472,5 @@ if (invited && /^[A-Z2-9]{6}$/i.test(invited)) {
 // 开发环境仅提供只读诊断入口，用于验证真实渲染与网络状态；生产构建会移除。
 if (import.meta.env.DEV) Object.defineProperty(window, '__tankBattle', { get: () => ({
   state: JSON.parse(JSON.stringify(state)), localId, role: rooms.role, fps,
-  camera: { yaw: renderer.yaw, pitch: renderer.pitch, zoom: renderer.zoom }, screen,
+  camera: { yaw: renderer.yaw, pitch: renderer.pitch, zoom: renderer.zoom, position: { x: renderer.camera.position.x, y: renderer.camera.position.y, z: renderer.camera.position.z } }, screen,
 }) });

@@ -1,5 +1,15 @@
 import { clamp, type Input } from './game/types';
 import type { BattleRenderer } from './game/renderer';
+import { CAMERA } from './game/camera';
+
+export function cameraRelativeMovement(right: number, forward: number, yaw: number) {
+  const length = Math.max(1, Math.hypot(right, forward));
+  // 以镜头的地面朝向为基准；摇杆的轻推幅度保留，斜向按键不会加速。
+  return {
+    moveX: (right * Math.cos(yaw) + forward * Math.sin(yaw)) / length,
+    moveZ: (forward * Math.cos(yaw) - right * Math.sin(yaw)) / length,
+  };
+}
 
 export class Controls {
   enabled = false;
@@ -55,7 +65,7 @@ export class Controls {
       const dx = document.pointerLockElement ? e.movementX : e.clientX - this.previous.x;
       const dy = document.pointerLockElement ? e.movementY : e.clientY - this.previous.y;
       this.renderer.yaw += dx * 0.004;
-      this.renderer.pitch = clamp(this.renderer.pitch + dy * 0.003, 0.18, 1.05);
+      this.renderer.pitch = clamp(this.renderer.pitch + dy * 0.003, CAMERA.minPitch, CAMERA.maxPitch);
       this.previous = { x: e.clientX, y: e.clientY };
     };
     const aimUp = (e: PointerEvent) => {
@@ -69,7 +79,7 @@ export class Controls {
     canvas.addEventListener('wheel', e => {
       if (!this.enabled) return;
       e.preventDefault();
-      this.renderer.zoom = clamp(this.renderer.zoom + e.deltaY * 0.01, 6, 19);
+      this.renderer.zoom = clamp(this.renderer.zoom + e.deltaY * 0.01, CAMERA.minZoom, CAMERA.maxZoom);
     }, { passive: false });
     stick.addEventListener('pointerdown', e => {
       if (!this.enabled || this.stickPointer !== -1) return;
@@ -114,12 +124,13 @@ export class Controls {
   }
 
   read(): Input {
-    if (!this.enabled) return { throttle: 0, steer: 0, aim: this.lastAim, fire: false };
+    if (!this.enabled) return { moveX: 0, moveZ: 0, aim: this.lastAim, fire: false };
     if (!this.freeLook && !this.keys.has('AltLeft') && !this.keys.has('AltRight')) this.lastAim = this.renderer.yaw;
     const key = (code: string) => this.keys.has(code) ? 1 : 0;
+    const right = clamp(key('KeyD') + key('ArrowRight') - key('KeyA') - key('ArrowLeft') + this.joystick.x, -1, 1);
+    const forward = clamp(key('KeyW') + key('ArrowUp') - key('KeyS') - key('ArrowDown') + this.joystick.y, -1, 1);
     return {
-      throttle: clamp(key('KeyW') + key('ArrowUp') - key('KeyS') - key('ArrowDown') + this.joystick.y, -1, 1),
-      steer: clamp(key('KeyD') + key('ArrowRight') - key('KeyA') - key('ArrowLeft') + this.joystick.x, -1, 1),
+      ...cameraRelativeMovement(right, forward, this.renderer.yaw),
       aim: this.lastAim, fire: this.firing || this.keys.has('Space'),
     };
   }

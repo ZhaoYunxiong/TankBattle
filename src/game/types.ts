@@ -3,8 +3,8 @@ export type Phase = 'lobby' | 'intermission' | 'battle' | 'won' | 'lost';
 export type Power = 'rapid' | 'burst' | 'heal' | 'armor';
 
 export interface Input {
-  throttle: number;
-  steer: number;
+  moveX: number;
+  moveZ: number;
   aim: number;
   fire: boolean;
 }
@@ -72,8 +72,10 @@ export interface BattleEvent {
   owner?: string;
 }
 
+export const PROTOCOL_VERSION = 2;
+
 export interface State {
-  version: 1;
+  version: typeof PROTOCOL_VERSION;
   seed: number;
   time: number;
   phase: Phase;
@@ -90,7 +92,7 @@ export interface State {
   events: BattleEvent[];
 }
 
-export const EMPTY_INPUT: Input = { throttle: 0, steer: 0, aim: Math.PI, fire: false };
+export const EMPTY_INPUT: Input = { moveX: 0, moveZ: 0, aim: Math.PI, fire: false };
 
 export const BASE = { x: 0, z: 23, radius: 2.2 };
 
@@ -120,6 +122,10 @@ export function damageHandling(hp: number, maxHp: number) {
 export function cleanInput(value: unknown): Input | null {
   if (!value || typeof value !== 'object') return null;
   const i = value as Input;
-  if (![i.throttle, i.steer, i.aim].every(Number.isFinite)) return null;
-  return { throttle: clamp(i.throttle, -1, 1), steer: clamp(i.steer, -1, 1), aim: Math.atan2(Math.sin(i.aim), Math.cos(i.aim)), fire: i.fire === true };
+  if (![i.moveX, i.moveZ, i.aim].every(Number.isFinite)) return null;
+  const x = clamp(i.moveX, -1, 1);
+  const z = clamp(i.moveZ, -1, 1);
+  // 房主也限制向量长度，斜向移动和网络输入都不能超过正常速度。
+  const length = Math.max(1, Math.hypot(x, z));
+  return { moveX: x / length, moveZ: z / length, aim: Math.atan2(Math.sin(i.aim), Math.cos(i.aim)), fire: i.fire === true };
 }

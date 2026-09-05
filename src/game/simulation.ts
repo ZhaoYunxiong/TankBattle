@@ -1,4 +1,4 @@
-import { angleDiff, ARENA, BASE, clamp, cleanInput, damageHandling, distance, EMPTY_INPUT, WAVES, type BattleEvent, type Input, type Power, type Shell, type State, type Tank } from './types';
+import { angleDiff, ARENA, BASE, clamp, cleanInput, damageHandling, distance, EMPTY_INPUT, PROTOCOL_VERSION, WAVES, type BattleEvent, type Input, type Power, type Shell, type State, type Tank } from './types';
 import { blocked, createMap, findPath, seededRandom, segmentCircle } from './world';
 
 export class Simulation {
@@ -21,7 +21,7 @@ export class Simulation {
   constructor(seed = Math.floor(Math.random() * 0x7fffffff)) {
     this.random = seededRandom(seed);
     this.state = {
-      version: 1, seed, time: 0, phase: 'lobby', paused: false, wave: 0,
+      version: PROTOCOL_VERSION, seed, time: 0, phase: 'lobby', paused: false, wave: 0,
       countdown: 3, remaining: 0, baseHp: 600, baseMaxHp: 600,
       tanks: [], obstacles: createMap(seed), shells: [], drops: [], events: [],
     };
@@ -139,11 +139,15 @@ export class Simulation {
         const received = this.inputs.get(t.id);
         // 断线或触控中断时，旧输入最多保持 0.4 秒，不让坦克持续失控。
         input = received && s.time - received.at < 0.4 ? received.value : { ...EMPTY_INPUT, aim: t.turret };
-      } else input = this.enemyInput(t);
-      t.angle += input.steer * dt * (t.kind === 'heavy' ? 1.3 : 1.9);
+        if (Math.hypot(input.moveX, input.moveZ) > 0.001) {
+          // 按方向立即移动，车身快速跟随朝向，不必先原地转完再前进。
+          const heading = Math.atan2(input.moveX, input.moveZ);
+          t.angle += clamp(angleDiff(heading, t.angle), -dt * 8, dt * 8);
+        }
+      } else input = this.enemyInput(t, dt);
       t.turret += clamp(angleDiff(input.aim, t.turret), -dt * 3.4, dt * 3.4);
       const speed = (t.team === 'player' ? 6 : t.kind === 'scout' ? 4.4 : t.kind === 'heavy' ? 2.5 : 3.3) * damageHandling(t.hp, t.maxHp).speed;
-      this.move(t, Math.sin(t.angle) * speed * input.throttle * dt, Math.cos(t.angle) * speed * input.throttle * dt);
+      this.move(t, input.moveX * speed * dt, input.moveZ * speed * dt);
       if (input.fire && t.cooldown <= 0 && s.phase === 'battle') {
         const burst = t.buffs.burst > 0;
         this.fire(t, burst ? 12 : t.team === 'player' ? 20 : 14);
@@ -201,7 +205,7 @@ export class Simulation {
     if (free(t.x, t.z + dz)) t.z += dz;
   }
 
-  private enemyInput(t: Tank): Input {
+  private enemyInput(t: Tank, dt: number): Input {
     const players = this.state.tanks.filter(p => p.team === 'player' && p.connected && p.hp > 0);
     const nearby = players.sort((a, b) => distance(a, t) - distance(b, t))[0];
     const target = nearby && distance(t, nearby) < (t.kind === 'scout' ? 10 : 20) ? nearby : BASE;
@@ -218,9 +222,11 @@ export class Simulation {
     const turn = angleDiff(Math.atan2(waypoint.x - t.x, waypoint.z - t.z), t.angle);
     const firingAt = obstruction && distance(obstruction, t) < 17 ? obstruction : target;
     const firingAim = Math.atan2(firingAt.x - t.x, firingAt.z - t.z);
+    const throttle = distance(t, target) > 9 || obstruction ? Math.abs(turn) < 1.2 ? 1 : 0.15 : 0;
+    // 敌军保留沿寻路路线转向的驾驶方式，玩家方向控制不改变其行为。
+    t.angle += clamp(turn * 2, -1, 1) * dt * (t.kind === 'heavy' ? 1.3 : 1.9);
     return {
-      throttle: distance(t, target) > 9 || obstruction ? Math.abs(turn) < 1.2 ? 1 : 0.15 : 0,
-      steer: clamp(turn * 2, -1, 1), aim: firingAim,
+      moveX: Math.sin(t.angle) * throttle, moveZ: Math.cos(t.angle) * throttle, aim: firingAim,
       fire: distance(t, firingAt) < 23 && Math.abs(angleDiff(t.turret, obstruction ? firingAim : aim)) < 0.12,
     };
   }

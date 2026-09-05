@@ -15,6 +15,7 @@ import { VertexBuffer } from '@babylonjs/core/Buffers/buffer';
 import { angleDiff, BASE, clamp, COLORS, distance, groundHeight, type BattleEvent, type Obstacle, type State, type Tank } from './types';
 import { seededRandom, segmentCircle } from './world';
 import { BattleAudio } from './audio';
+import { CAMERA } from './camera';
 
 type TankVisual = { root: TransformNode; turret: TransformNode; barrel: Mesh; body: Mesh; shield: Mesh };
 
@@ -31,9 +32,9 @@ export class BattleRenderer {
 
   yaw = Math.PI;
 
-  pitch = 0.48;
+  pitch = CAMERA.pitch;
 
-  zoom = 11.5;
+  zoom = CAMERA.zoom;
 
   shakeEnabled = true;
 

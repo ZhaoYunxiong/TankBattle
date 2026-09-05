@@ -12,6 +12,15 @@ test('桌面真实三维渲染、驾驶、炮击和暂停', async ({ page }) => 
   await page.getByRole('button', { name: '开始单人战役' }).click();
   await expect(page.locator('#hud')).toBeVisible();
   await expect.poll(() => page.evaluate(() => (window as any).__tankBattle.state.phase)).toBe('battle');
+  await expect.poll(() => page.evaluate(() => (window as any).__tankBattle.camera.position.y)).toBeGreaterThan(11);
+  const initial = await page.evaluate(() => (window as any).__tankBattle.state.tanks[0]);
+  // 只按左键就应产生横向位移，不依赖前进键，炮塔仍对准原来的瞄准方向。
+  await page.keyboard.down('KeyA');
+  await expect.poll(() => page.evaluate(() => (window as any).__tankBattle.state.tanks[0].x)).toBeGreaterThan(initial.x + 1.2);
+  await page.keyboard.up('KeyA');
+  const left = await page.evaluate(() => (window as any).__tankBattle.state.tanks[0]);
+  expect(left.z).toBeCloseTo(initial.z);
+  expect(left.turret).toBeCloseTo(initial.turret);
   const before = await page.evaluate(() => (window as any).__tankBattle.state.tanks[0].z);
   await page.keyboard.down('KeyW');
   // 等待实际移动结果，避免 CI 软件渲染速度影响固定墙钟延迟的断言。
@@ -31,6 +40,12 @@ test('桌面真实三维渲染、驾驶、炮击和暂停', async ({ page }) => 
   expect(await page.evaluate(() => (window as any).__tankBattle.state.time)).toBe(time);
   await page.getByRole('button', { name: '继续战斗' }).click();
   await expect(page.locator('#pauseDialog')).not.toBeVisible();
+  await page.mouse.wheel(0, 10000);
+  await expect.poll(() => page.evaluate(() => (window as any).__tankBattle.camera.zoom)).toBe(30);
+  await page.keyboard.press('KeyC');
+  const reset = await page.evaluate(() => (window as any).__tankBattle.camera);
+  expect(reset.zoom).toBe(18);
+  expect(reset.pitch).toBe(0.7);
   expect(errors).toEqual([]);
 });
 
@@ -47,20 +62,31 @@ test('手机竖屏、横屏和双拇指输入', async ({ browser }) => {
   await page.locator('#soloButton').tap();
   await expect(page.locator('#joystick')).toBeVisible();
   await expect.poll(() => page.evaluate(() => (window as any).__tankBattle.state.phase)).toBe('battle');
-  const before = await page.evaluate(() => (window as any).__tankBattle.state.tanks[0].z);
+  await expect.poll(() => page.evaluate(() => (window as any).__tankBattle.camera.position.y)).toBeGreaterThan(13);
+  const before = await page.evaluate(() => (window as any).__tankBattle.state.tanks[0]);
   const cdp = await context.newCDPSession(page);
   const stick = (await page.locator('#joystick').boundingBox())!;
   const fire = (await page.locator('#fireButton').boundingBox())!;
-  const left = { x: stick.x + stick.width / 2, y: stick.y + 18, id: 1 };
+  const left = { x: stick.x + 12, y: stick.y + stick.height / 2, id: 1 };
   const right = { x: fire.x + fire.width / 2, y: fire.y + fire.height / 2, id: 2 };
   await cdp.send('Input.dispatchTouchEvent', { type: 'touchStart', touchPoints: [left] });
   await cdp.send('Input.dispatchTouchEvent', { type: 'touchStart', touchPoints: [left, right] });
-  await expect.poll(() => page.evaluate(() => (window as any).__tankBattle.state.tanks[0].z)).toBeLessThan(before - 1.5);
-  await cdp.send('Input.dispatchTouchEvent', { type: 'touchMove', touchPoints: [left, { ...right, x: right.x - 45 }] });
-  await page.waitForTimeout(400);
+  await expect.poll(() => page.evaluate(() => (window as any).__tankBattle.state.tanks[0].x)).toBeGreaterThan(before.x + 1.2);
+  await cdp.send('Input.dispatchTouchEvent', { type: 'touchEnd', touchPoints: [] });
+  const moved = await page.evaluate(() => (window as any).__tankBattle.state.tanks[0]);
+  expect(moved.z).toBeCloseTo(before.z);
+  // 松开摇杆后旋转镜头，再次向左推；位移应跟随新的画面左侧。
+  await cdp.send('Input.dispatchTouchEvent', { type: 'touchStart', touchPoints: [right] });
+  await cdp.send('Input.dispatchTouchEvent', { type: 'touchMove', touchPoints: [{ ...right, x: right.x - 100 }] });
+  await cdp.send('Input.dispatchTouchEvent', { type: 'touchEnd', touchPoints: [] });
+  const rotated = await page.evaluate(() => (window as any).__tankBattle);
+  await cdp.send('Input.dispatchTouchEvent', { type: 'touchStart', touchPoints: [left] });
+  await expect.poll(() => page.evaluate(() => (window as any).__tankBattle.state.tanks[0].x)).toBeGreaterThan(moved.x + 1);
   await cdp.send('Input.dispatchTouchEvent', { type: 'touchEnd', touchPoints: [] });
   const diagnostics = await page.evaluate(() => (window as any).__tankBattle);
-  expect(diagnostics.state.tanks[0].z).toBeLessThan(before - 1);
+  const dx = diagnostics.state.tanks[0].x - rotated.state.tanks[0].x;
+  const dz = diagnostics.state.tanks[0].z - rotated.state.tanks[0].z;
+  expect(dz / dx).toBeCloseTo(-Math.tan(rotated.camera.yaw), 1);
   expect(Math.abs(diagnostics.camera.yaw - Math.PI)).toBeGreaterThan(0.1);
   expect(diagnostics.state.events.some((e: any) => e.kind === 'shot')).toBe(true);
   await page.screenshot({ path: 'artifacts/mobile-portrait.png' });
@@ -107,10 +133,14 @@ test('手机创建房间，第二位玩家通过真实 WebRTC 同步战场', asy
   const guestState = await guest.evaluate(() => (window as any).__tankBattle.state);
   expect(hostState.seed).toBe(guestState.seed);
   expect(hostState.obstacles).toEqual(guestState.obstacles);
+  const guestBefore = await guest.evaluate(() => {
+    const d = (window as any).__tankBattle;
+    return d.state.tanks.find((t: any) => t.id === d.localId);
+  });
   const cdp = await guestContext.newCDPSession(guest);
   const stick = (await guest.locator('#joystick').boundingBox())!;
-  await cdp.send('Input.dispatchTouchEvent', { type: 'touchStart', touchPoints: [{ x: stick.x + stick.width / 2, y: stick.y + 12, id: 1 }] });
-  await guest.waitForTimeout(1600);
+  await cdp.send('Input.dispatchTouchEvent', { type: 'touchStart', touchPoints: [{ x: stick.x + 12, y: stick.y + stick.height / 2, id: 1 }] });
+  await expect.poll(() => host.evaluate(() => (window as any).__tankBattle.state.tanks.find((t: any) => t.team === 'player' && t.name !== '房主坦克').x)).toBeGreaterThan(guestBefore.x + 1);
   await cdp.send('Input.dispatchTouchEvent', { type: 'touchEnd', touchPoints: [] });
   await guest.waitForTimeout(600);
   const hostGuest = await host.evaluate(() => (window as any).__tankBattle.state.tanks.find((t: any) => t.team === 'player' && t.name !== '房主坦克'));
@@ -118,7 +148,9 @@ test('手机创建房间，第二位玩家通过真实 WebRTC 同步战场', asy
     const d = (window as any).__tankBattle;
     return d.state.tanks.find((t: any) => t.id === d.localId);
   });
-  expect(hostGuest.z).toBeLessThan(13);
+  expect(hostGuest.x).toBeGreaterThan(guestBefore.x + 1);
+  expect(hostGuest.z).toBeCloseTo(guestBefore.z);
+  expect(Math.abs(hostGuest.x - guestSelf.x)).toBeLessThan(0.4);
   expect(Math.abs(hostGuest.z - guestSelf.z)).toBeLessThan(0.4);
   await host.locator('#pauseButton').tap();
   await expect.poll(() => guest.evaluate(() => (window as any).__tankBattle.state.paused)).toBe(true);

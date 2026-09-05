@@ -1,6 +1,7 @@
 import Peer, { type DataConnection, type PeerOptions } from 'peerjs';
-import type { Input, State } from './game/types';
+import { PROTOCOL_VERSION, type Input, type State } from './game/types';
 
+// 房间地址前缀沿用旧值，握手版本不同时可以明确提示双方刷新页面。
 const PREFIX = 'valley-tanks-v1-';
 
 export class Rooms {
@@ -91,7 +92,7 @@ export class Rooms {
         connection.on('error', () => {});
         connection.on('open', () => {
           const metadata = connection.metadata as { name?: unknown; version?: number } | undefined;
-          if (metadata?.version !== 1 || this.connections.size >= 3 || !this.onJoin(connection.peer, typeof metadata.name === 'string' ? metadata.name.slice(0, 16) : '守卫者')) {
+          if (metadata?.version !== PROTOCOL_VERSION || this.connections.size >= 3 || !this.onJoin(connection.peer, typeof metadata.name === 'string' ? metadata.name.slice(0, 16) : '守卫者')) {
             connection.send({ type: 'rejected', reason: '房间已满，或游戏版本不一致。请刷新后重试。' });
             window.setTimeout(() => connection.close(), 200);
             return;
@@ -121,7 +122,7 @@ export class Rooms {
     if (!/^[A-Z2-9]{6}$/.test(this.code)) { this.close(); throw new Error('请输入 6 位房间号。'); }
     try {
       const peer = await this.open(this.playerId);
-      const connection = peer.connect(PREFIX + this.code, { reliable: true, serialization: 'json', metadata: { name, version: 1 } });
+      const connection = peer.connect(PREFIX + this.code, { reliable: true, serialization: 'json', metadata: { name, version: PROTOCOL_VERSION } });
       this.host = connection;
       await new Promise<void>((resolve, reject) => {
         const timer = window.setTimeout(() => reject(new Error('没有连上房主。请检查房间号；同一 Wi-Fi 通常更容易直连。')), 18000);
@@ -131,7 +132,7 @@ export class Rooms {
           if (!packet || typeof packet !== 'object') return;
           if (packet.type === 'rejected') { clearTimeout(timer); reject(new Error(packet.reason || '房间拒绝了连接。')); return; }
           const state = packet.state;
-          if (packet.type === 'state' && state?.version === 1 && Array.isArray(state.tanks) && state.tanks.length <= 20 && Array.isArray(state.obstacles) && Array.isArray(state.events)) {
+          if (packet.type === 'state' && state?.version === PROTOCOL_VERSION && Array.isArray(state.tanks) && state.tanks.length <= 20 && Array.isArray(state.obstacles) && Array.isArray(state.events)) {
             this.lastStateAt = performance.now();
             this.onState(state);
             if (!receivedState) { receivedState = true; clearTimeout(timer); resolve(); }

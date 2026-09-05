@@ -20,6 +20,40 @@ function impact(x: number, z: number, damage = 20): Shell {
 }
 
 describe('战斗规则', () => {
+  it.each([
+    { moveX: 1, moveZ: 0 },
+    { moveX: -1, moveZ: 0 },
+    { moveX: 0, moveZ: 1 },
+    { moveX: 0, moveZ: -1 },
+  ])('方向输入 $moveX / $moveZ 立即移动，车身自动转向且炮塔独立', movement => {
+    const { sim, player } = battle();
+    sim.state.obstacles = [];
+    sim.input(player.id, { ...movement, aim: Math.PI, fire: false });
+    sim.step(1 / 30);
+    expect(player.x).toBeCloseTo(movement.moveX * 0.2);
+    expect(player.z).toBeCloseTo(movement.moveZ * 0.2);
+    for (let i = 0; i < 15; i++) {
+      sim.input(player.id, { ...movement, aim: Math.PI, fire: false });
+      sim.step(1 / 30);
+    }
+    expect(Math.sin(player.angle)).toBeCloseTo(movement.moveX);
+    expect(Math.cos(player.angle)).toBeCloseTo(movement.moveZ);
+    expect(player.turret).toBeCloseTo(Math.PI);
+  });
+
+  it('方向移动保持碰撞约束、受损减速与斜向限速', () => {
+    const { sim, player } = battle();
+    player.hp = 10;
+    sim.state.obstacles = [{ id: 1, kind: 'rock', x: 2, z: 0, radius: 1, height: 3, hp: 80, maxHp: 80, rotation: 0 }];
+    sim.input(player.id, { moveX: 1, moveZ: 0, aim: Math.PI, fire: false });
+    sim.step(1 / 30);
+    expect(player.x).toBe(0);
+    sim.state.obstacles = [];
+    sim.input(player.id, { moveX: 1, moveZ: 1, aim: Math.PI, fire: false });
+    sim.step(1 / 30);
+    expect(Math.hypot(player.x, player.z)).toBeCloseTo(0.2 * damageHandling(player.hp, player.maxHp).speed);
+  });
+
   it('普通炮弹不会秒杀满血坦克和营地', () => {
     const { sim, player } = battle();
     sim.state.shells.push(impact(player.x, player.z));
@@ -33,7 +67,7 @@ describe('战斗规则', () => {
   it('持续按住开火仍受装填冷却限制', () => {
     const { sim, player } = battle();
     for (let i = 0; i < 90; i++) {
-      sim.input(player.id, { throttle: 0, steer: 0, aim: Math.PI, fire: true });
+      sim.input(player.id, { moveX: 0, moveZ: 0, aim: Math.PI, fire: true });
       sim.step(1 / 30);
     }
     const shots = sim.state.events.filter(e => e.kind === 'shot' && e.owner === player.id);
@@ -86,7 +120,7 @@ describe('战斗规则', () => {
   it('连发的三枚炮弹仍无法一轮击毁满血轻型坦克', () => {
     const { sim, player } = battle();
     player.buffs.burst = 10;
-    sim.input(player.id, { throttle: 0, steer: 0, aim: Math.PI, fire: true });
+    sim.input(player.id, { moveX: 0, moveZ: 0, aim: Math.PI, fire: true });
     for (let i = 0; i < 10; i++) sim.step(1 / 30);
     const shells = sim.state.shells.filter(s => s.owner === player.id);
     expect(shells.length).toBe(3);
@@ -95,7 +129,7 @@ describe('战斗规则', () => {
 
   it('断线输入过期后不会一直前进', () => {
     const { sim, player } = battle();
-    sim.input(player.id, { throttle: 1, steer: 0, aim: Math.PI, fire: false });
+    sim.input(player.id, { moveX: 0, moveZ: -1, aim: Math.PI, fire: false });
     for (let i = 0; i < 30; i++) sim.step(1 / 30);
     const stopped = player.z;
     for (let i = 0; i < 30; i++) sim.step(1 / 30);
@@ -164,8 +198,12 @@ describe('地图、导航与网络边界', () => {
   });
 
   it('拒绝非法输入，限制客户端提供的移动量', () => {
-    expect(cleanInput({ throttle: NaN, steer: 0, aim: 0, fire: true })).toBeNull();
-    expect(cleanInput({ throttle: 100, steer: -100, aim: 0, fire: 1 })).toEqual({ throttle: 1, steer: -1, aim: 0, fire: false });
+    expect(cleanInput({ moveX: NaN, moveZ: 0, aim: 0, fire: true })).toBeNull();
+    expect(cleanInput({ moveX: 100, moveZ: 0, aim: 0, fire: 1 })).toEqual({ moveX: 1, moveZ: 0, aim: 0, fire: false });
+    const diagonal = cleanInput({ moveX: 100, moveZ: -100, aim: 0, fire: false })!;
+    expect(Math.hypot(diagonal.moveX, diagonal.moveZ)).toBeCloseTo(1);
+    expect(cleanInput({ moveX: 0, moveZ: Infinity, aim: 0, fire: false })).toBeNull();
+    expect(cleanInput({ throttle: 1, steer: 0, aim: 0, fire: false })).toBeNull();
   });
 
   it('房间最多容纳四人，重连恢复同一辆坦克', () => {
