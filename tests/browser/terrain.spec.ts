@@ -5,7 +5,10 @@ for (const mobile of [false, true]) test((mobile ? '手机' : '桌面') + '坡�
   const page = await context.newPage();
   const errors: string[] = [];
   page.on('pageerror', error => errors.push(error.message));
-  await page.addInitScript(() => { Math.random = () => 47 / 0x7fffffff; });
+  await page.addInitScript(low => {
+    Math.random = () => 47 / 0x7fffffff;
+    if (low) localStorage.setItem('tb-quality', 'low');
+  }, !!process.env.CI);
   await page.goto('./');
   await page.locator('#soloButton').click();
   await expect.poll(() => page.evaluate(() => (window as any).__tankBattle.state.phase)).toBe('battle');
@@ -26,31 +29,34 @@ for (const mobile of [false, true]) test((mobile ? '手机' : '桌面') + '坡�
   })).toBe(true);
   const cdp = mobile ? await context.newCDPSession(page) : null;
   const drive = async (axis: 'x' | 'z', target: number) => {
+    let sample;
     if (cdp) {
       const stick = (await page.locator('#joystick').boundingBox())!;
       await cdp.send('Input.dispatchTouchEvent', { type: 'touchStart', touchPoints: [{ x: axis === 'x' ? stick.x + 10 : stick.x + stick.width / 2, y: axis === 'z' ? stick.y + 10 : stick.y + stick.height / 2, id: 1 }] });
     } else await page.keyboard.down(axis === 'x' ? 'KeyA' : 'KeyW');
     try {
-      await page.waitForFunction(({ axis, target }) => {
-        const tank = (window as any).__tankBattle.state.tanks[0];
-        return axis === 'x' ? tank.x >= target : tank.z <= target;
+      sample = await page.waitForFunction(({ axis, target }) => {
+        const diagnostics = (window as any).__tankBattle;
+        const tank = diagnostics.state.tanks[0];
+        // 在驶过目标位置的当帧记录姿态；慢速远程驱动的松键延迟可能让坦克继续驶上平坦台地。
+        return (axis === 'x' ? tank.x >= target : tank.z <= target) ? { vehicle: diagnostics.vehicle, camera: diagnostics.camera, terrain: diagnostics.terrain } : false;
       }, { axis, target }, { timeout: process.env.CI ? 90000 : 25000 });
     } finally {
       if (cdp) await cdp.send('Input.dispatchTouchEvent', { type: 'touchEnd', touchPoints: [] });
       else await page.keyboard.up(axis === 'x' ? 'KeyA' : 'KeyW');
     }
+    const result = await sample.jsonValue();
+    await sample.dispose();
+    if (!result) throw new Error('未读取到目标位置的行驶状态');
+    return result;
   };
   await drive('z', 24);
-  await drive('x', 16);
-  await page.waitForTimeout(250);
-  const slope = await page.evaluate(() => (window as any).__tankBattle);
+  const slope = await drive('x', 13);
   expect(slope.vehicle.position.y).toBeGreaterThan(3);
   expect(Math.abs(slope.vehicle.pitch)).toBeGreaterThan(0.2);
   expect(slope.camera.position.y - slope.terrain.cameraGround).toBeGreaterThanOrEqual(1);
   await page.screenshot({ path: 'artifacts/terrain-' + (mobile ? 'mobile' : 'desktop') + '-slope.png' });
-  await drive('x', 25);
-  await page.waitForTimeout(250);
-  const summit = await page.evaluate(() => (window as any).__tankBattle);
+  const summit = await drive('x', 25);
   expect(summit.vehicle.position.y).toBeGreaterThan(6.5);
   expect(summit.terrain.size).toEqual({ x: 96, z: 120 });
   expect(summit.camera.position.y - summit.terrain.cameraGround).toBeGreaterThanOrEqual(1);
