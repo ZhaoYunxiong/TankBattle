@@ -133,7 +133,7 @@ export class Rooms {
           if (!packet || typeof packet !== 'object') return;
           if (packet.type === 'rejected') { clearTimeout(timer); reject(new Error(packet.reason || '房间拒绝了连接。')); return; }
           const state = packet.state;
-          if (packet.type === 'state' && state?.version === PROTOCOL_VERSION && (state.mode === 'classic' || state.mode === 'defense') && Array.isArray(state.tanks) && state.tanks.length <= 20 && Array.isArray(state.obstacles) && Array.isArray(state.events)) {
+          if (packet.type === 'state' && state?.version === PROTOCOL_VERSION && (state.mode === 'classic' || state.mode === 'defense') && ['casual', 'normal', 'challenge'].includes(state.difficulty) && Array.isArray(state.tanks) && state.tanks.length <= 20 && Array.isArray(state.obstacles) && Array.isArray(state.events)) {
             this.lastStateAt = performance.now();
             this.onState(state);
             if (!receivedState) { receivedState = true; clearTimeout(timer); resolve(); }

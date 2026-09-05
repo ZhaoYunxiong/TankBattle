@@ -22,7 +22,7 @@ describe('经典攻防与防守模式', () => {
     const classic = new Simulation(47).state;
     const defense = new Simulation(47, 'defense').state;
     expect(classic.mode).toBe('classic');
-    expect(classic.enemyBaseHp).toBe(600);
+    expect(classic.enemyBaseHp).toBe(360);
     expect(classic.obstacles.filter(o => o.team === 'enemy')).toHaveLength(15);
     expect(classic.obstacles.filter(o => o.team === 'player')).toHaveLength(15);
     expect(defense.enemyBaseHp).toBe(0);
@@ -36,11 +36,11 @@ describe('经典攻防与防守模式', () => {
     sim.state.remaining = 0;
     sim.step(1 / 30);
     expect(sim.state.phase).toBe('battle');
-    for (let shot = 1; shot <= 30; shot++) {
+    for (let shot = 1; shot <= 18; shot++) {
       sim.state.shells.push(shell(ENEMY_BASE.x, ENEMY_BASE.z, 'player'));
       sim.step(1 / 30);
-      expect(sim.state.enemyBaseHp).toBe(600 - shot * 20);
-      expect(sim.state.phase).toBe(shot < 30 ? 'battle' : 'won');
+      expect(sim.state.enemyBaseHp).toBe(360 - shot * 20);
+      expect(sim.state.phase).toBe(shot < 18 ? 'battle' : 'won');
     }
     expect(player.score).toBe(1000);
     expect(sim.state.events.filter(e => e.kind === 'destroy' && e.z === ENEMY_BASE.z)).toHaveLength(1);
@@ -55,7 +55,7 @@ describe('经典攻防与防守模式', () => {
     sim.state.shells.push(shell(ENEMY_BASE.x, ENEMY_BASE.z, 'enemy'));
     sim.step(1 / 30);
     expect(sim.state.baseHp).toBe(600);
-    expect(sim.state.enemyBaseHp).toBe(600);
+    expect(sim.state.enemyBaseHp).toBe(360);
     sim.state.baseHp = 20;
     sim.state.shells.push(shell(BASE.x, BASE.z, 'enemy'));
     sim.step(1 / 30);
@@ -79,7 +79,7 @@ describe('经典攻防与防守模式', () => {
     const { sim } = battle('defense');
     for (let wave = 1; wave <= 5; wave++) {
       expect(sim.state.wave).toBe(wave);
-      expect(sim.state.remaining).toBe(3 + wave * 2);
+      expect(sim.state.remaining).toBe(3 + wave);
       sim.state.remaining = 0;
       sim.state.tanks = sim.state.tanks.filter(t => t.team === 'player');
       sim.step(1 / 30);
@@ -91,12 +91,12 @@ describe('经典攻防与防守模式', () => {
     }
   });
 
-  it('经典模式持续派出进攻部队并保留驻军，增援数量有上限', () => {
+  it('经典模式首批两辆进攻与一辆驻军，同时在场不超过三辆', () => {
     const { sim } = battle();
     for (let frame = 0; frame < 900; frame++) sim.step(1 / 30);
     const enemies = sim.state.tanks.filter(t => t.team === 'enemy');
     expect(enemies.length).toBeGreaterThanOrEqual(3);
-    expect(enemies.length).toBeLessThanOrEqual(6);
+    expect(enemies.length).toBeLessThanOrEqual(3);
     expect(enemies.some(t => t.z < ENEMY_BASE.z + 13)).toBe(true);
     expect(enemies.some(t => t.z > -20)).toBe(true);
     expect(sim.state.phase).toBe('battle');

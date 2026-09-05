@@ -48,6 +48,11 @@ svg { display: block; width: 22px; height: 22px; flex-shrink: 0; }
 .mode-options b { font-size: 12px; font-weight: 600; letter-spacing: 1px; }
 .mode-options i { padding: 2px 4px; font-size: 8px; font-style: normal; color: #658062; background: #f3f5e4; border-radius: 3px; }
 .mode-options small { display: block; font-size: 9px; line-height: 1.6; color: #78816e; margin-top: 5px; }
+.difficulty-picker { display: grid; grid-template-columns: auto 1fr; gap: 6px 16px; align-items: center; margin-bottom: 12px; min-width: 0; }
+.difficulty-picker label { color: var(--muted); font-size: 11px; letter-spacing: 1px; }
+.difficulty-picker select { min-width: 0; min-height: 36px; padding: 5px 10px; border: 1px solid #71826742; border-radius: 7px; color: var(--ink); background: #f4f1e8bb; }
+.difficulty-picker small { grid-column: 1 / -1; color: var(--muted); font-size: 10px; line-height: 1.5; }
+.wave .difficulty-badge { margin-left: 6px; letter-spacing: 0; opacity: .85; }
 .player-name { display: flex; align-items: center; gap: 16px; width: 100%; margin-bottom: 17px; color: var(--muted); font-size: 11px; letter-spacing: 1px; }
 .player-name input { flex: 1; min-width: 0; background: transparent; border: 0; border-bottom: 1px solid #61745340; padding: 8px 0; color: var(--ink); border-radius: 0; font-size: 13px; }
 .primary, .secondary, .text-button { display: flex; align-items: center; justify-content: center; gap: 12px; min-height: 49px; border-radius: 8px; padding: 12px 20px; border: 1px solid transparent; font-size: 13px; font-weight: 550; letter-spacing: 1.5px; transition: transform .2s, background .2s; }
@@ -72,6 +77,13 @@ svg { display: block; width: 22px; height: 22px; flex-shrink: 0; }
 #toast { position: absolute; top: max(88px, calc(env(safe-area-inset-top) + 66px)); left: 50%; transform: translateX(-50%); padding: 12px 20px; width: max-content; max-width: min(90vw, 520px); background: #f8f5e9f0; border: 1px solid #61714b33; border-radius: 10px; box-shadow: 0 8px 30px #34453418; color: #4c5e4a; font-size: 13px; line-height: 1.7; z-index: 20; text-align: center; }
 #hud:not([hidden]) ~ #toast { top: max(170px, calc(env(safe-area-inset-top) + 150px)); }
 .fatal { position: fixed; inset: 20%; padding: 30px; background: var(--paper); border-radius: 20px; pointer-events: auto; line-height: 1.8; }
+@media (min-width: 701px) and (min-height: 581px) {
+  .hero { transform: translateY(-50%); max-height: calc(100dvh - 170px); overflow-y: auto; pointer-events: auto; scrollbar-width: thin; padding: 6px; }
+}
+@media (min-width: 701px) and (min-height: 581px) and (max-height: 850px) {
+  .hero h1 { font-size: 48px; line-height: 1.1; margin: 12px 0; }
+  .hero-description { margin-bottom: 14px; line-height: 1.6; }
+}
 @media (max-width: 700px) and (orientation: portrait) {
   .menu-screen { display: flex; flex-direction: column; overflow-y: auto; pointer-events: auto; background: linear-gradient(0deg, #eeede2 0%, #eeede2fc 42%, #eeede2b0 64%, transparent 85%); }
   .topbar { position: relative; top: auto; left: auto; right: auto; margin: max(20px, env(safe-area-inset-top)) 22px 0; flex-shrink: 0; }
@@ -106,7 +118,8 @@ svg { display: block; width: 22px; height: 22px; flex-shrink: 0; }
   .hero > .player-name { grid-column: 2; grid-row: 3; }
   .hero > .solo-button { grid-column: 2; grid-row: 4; }
   .hero > .button-row { grid-column: 2; grid-row: 5; }
-  .hero > .menu-meta { grid-column: 1; grid-row: 4; flex-wrap: wrap; }
+  .hero > .difficulty-picker { grid-column: 1; grid-row: 4; margin: 0; gap: 4px 8px; }
+  .hero > .menu-meta { grid-column: 1; grid-row: 5; flex-wrap: wrap; }
   .mode-options button { padding: 9px 8px; min-height: 62px; }
   .hero h1 { display: flex; font-size: 40px; margin: 12px 0; letter-spacing: 4px; }
   .hero-description { margin-bottom: 7px; font-size: 11px; }

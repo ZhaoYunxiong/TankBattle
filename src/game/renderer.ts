@@ -19,7 +19,7 @@ import { CAMERA } from './camera';
 import { groundHeight, groundSlope, terrainVertex, terrainIntersection, TERRAIN_STEP } from './terrain';
 import { SHOT_HEIGHT, shotSlope, traceShot } from './combat';
 
-type TankVisual = { root: TransformNode; chassis: TransformNode; gun: TransformNode; turret: TransformNode; barrel: Mesh; body: Mesh; shield: Mesh };
+type TankVisual = { root: TransformNode; chassis: TransformNode; gun: TransformNode; turret: TransformNode; barrel: Mesh; body: Mesh; shield: Mesh; warning: Mesh };
 
 type Particle = { mesh: Mesh; vx: number; vy: number; vz: number; life: number; max: number; grow: number };
 
@@ -326,6 +326,11 @@ export class BattleRenderer {
     const muzzle = this.cylinder('muzzle', 0.28, 0.28, 0.25, '#465a4e', gun);
     muzzle.rotation.x = Math.PI / 2;
     muzzle.position.set(0, 0, 1.94);
+    const warning = MeshBuilder.CreateSphere('aim-warning', { diameter: 0.42, segments: 4 }, this.scene);
+    warning.parent = gun;
+    warning.position.set(0, 0, 2.12);
+    warning.material = this.material('#ffe6a0', true);
+    warning.setEnabled(false);
     const stripe = this.box('stripe', 0.13, 0.018, 0.6, '#f2e5c8', chassis);
     stripe.position.set(0.45, 0.973, -0.55);
     const antenna = this.cylinder('antenna', 0.025, 0.035, 0.75, '#4b594c', turret);
@@ -336,7 +341,7 @@ export class BattleRenderer {
     shield.position.y = 0.11;
     for (const mesh of root.getChildMeshes()) this.shadows.addShadowCaster(mesh);
     if (t.kind === 'heavy') root.scaling.setAll(1.12);
-    return { root, chassis, gun, turret, barrel, body, shield };
+    return { root, chassis, gun, turret, barrel, body, shield, warning };
   }
 
   private particle(x: number, y: number, z: number, color: string, smoke = false, force = 1) {
@@ -413,6 +418,9 @@ export class BattleRenderer {
       visual.barrel.position.z += (1.13 - visual.barrel.position.z) * Math.min(1, dt * 12);
       visual.shield.setEnabled(t.shield > 0 || t.buffs.armor > 0);
       visual.shield.visibility = 0.65 + Math.sin(this.elapsed * 6) * 0.25;
+      visual.warning.setEnabled(t.team === 'enemy' && t.warning > 0);
+      visual.warning.scaling.setAll(0.65 + t.warning * 0.9);
+      visual.warning.visibility = 0.65 + Math.sin(this.elapsed * 22) * 0.3;
     }
     for (const [id, visual] of this.tankVisuals) {
       if (!state.tanks.some(t => t.id === id)) { visual.root.dispose(); this.tankVisuals.delete(id); }

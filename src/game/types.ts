@@ -4,6 +4,8 @@ export type Power = 'rapid' | 'burst' | 'heal' | 'armor';
 
 export type GameMode = 'classic' | 'defense';
 
+export type Difficulty = 'casual' | 'normal' | 'challenge';
+
 export const MODES: Record<GameMode, { name: string; description: string }> = {
   classic: { name: '经典模式', description: '守住己方营地，攻破敌军阵地' },
   defense: { name: '防守模式', description: '守护营地，击退五波来袭敌军' },
@@ -29,6 +31,7 @@ export interface Tank {
   hp: number;
   maxHp: number;
   cooldown: number;
+  warning: number;
   lives: number;
   respawn: number;
   shield: number;
@@ -84,18 +87,20 @@ export interface BattleEvent {
   power?: Power;
 }
 
-export const PROTOCOL_VERSION = 4;
+export const PROTOCOL_VERSION = 5;
 
 export interface State {
   version: typeof PROTOCOL_VERSION;
   seed: number;
   mode: GameMode;
+  difficulty: Difficulty;
   time: number;
   phase: Phase;
   paused: boolean;
   wave: number;
   countdown: number;
   remaining: number;
+  reinforcementCountdown: number;
   baseHp: number;
   baseMaxHp: number;
   enemyBaseHp: number;
@@ -145,7 +150,7 @@ export const angleDiff = (a: number, b: number) => Math.atan2(Math.sin(a - b), M
 
 export function damageHandling(hp: number, maxHp: number) {
   const damage = clamp((0.6 - hp / maxHp) / 0.6, 0, 1);
-  return { speed: 1 - damage * 0.25, spread: 0.008 + damage * 0.075 };
+  return { speed: 1 - damage * 0.15, spread: 0.008 + damage * 0.075 };
 }
 
 export function cleanInput(value: unknown): Input | null {

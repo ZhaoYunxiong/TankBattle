@@ -56,7 +56,7 @@ function segmentCylinder(a: Point3, b: Point3, x: number, z: number, radius: num
   return enter <= leave ? enter : null;
 }
 
-export function traceShot(state: State, team: Tank['team'], a: Point3, b: Point3) {
+export function traceShot(state: State, team: Tank['team'], a: Point3, b: Point3): { at: number; target: ShotTarget | null } | null {
   const ground = terrainIntersection(a, b);
   let at = ground ?? Infinity;
   let target: ShotTarget | null = null;

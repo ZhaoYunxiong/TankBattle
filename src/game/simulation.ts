@@ -1,7 +1,17 @@
-import { angleDiff, ARENA, BASE, ENEMY_BASE, PLAYER_SPAWN_Z, SIDE_LANE, clamp, cleanInput, damageHandling, distance, EMPTY_INPUT, PROTOCOL_VERSION, WAVES, type BattleEvent, type GameMode, type Input, type Power, type Shell, type State, type Tank } from './types';
+import { angleDiff, ARENA, BASE, ENEMY_BASE, PLAYER_SPAWN_Z, SIDE_LANE, clamp, cleanInput, damageHandling, distance, EMPTY_INPUT, PROTOCOL_VERSION, WAVES, type BattleEvent, type Difficulty, type GameMode, type Input, type Power, type Shell, type State, type Tank } from './types';
 import { blocked, createMap, findPath, seededRandom, segmentCircle } from './world';
 import { groundHeight, slopeSpeed, terrainIntersection } from './terrain';
 import { SHOT_HEIGHT, shotSlope, traceShot } from './combat';
+import { attackSize, DIFFICULTIES, enemyLimit, reserveSize, waveSize } from './balance';
+
+interface EnemyMemory {
+  lastSeen?: { x: number; z: number };
+  searchUntil: number;
+  aimTarget?: string;
+  readyAt: number;
+  shotAt?: number;
+  lockedAim: number;
+}
 
 export class Simulation {
   state: State;
@@ -20,16 +30,24 @@ export class Simulation {
 
   private dropAt = 20;
 
-  private spawned = 0;
+  private attackersToSpawn = 0;
+
+  private batchActive = false;
+
+  private enemyKills = 0;
+
+  private memories = new Map<string, EnemyMemory>();
+
+  private focus = new Map<string, number>();
 
   private guardPosts = new Map<string, { x: number; z: number }>();
 
-  constructor(seed = Math.floor(Math.random() * 0x7fffffff), mode: GameMode = 'classic') {
+  constructor(seed = Math.floor(Math.random() * 0x7fffffff), mode: GameMode = 'classic', difficulty: Difficulty = 'normal') {
     this.random = seededRandom(seed);
     this.state = {
-      version: PROTOCOL_VERSION, seed, mode, time: 0, phase: 'lobby', paused: false, wave: 0,
-      countdown: 3, remaining: 0, baseHp: 600, baseMaxHp: 600,
-      enemyBaseHp: mode === 'classic' ? 600 : 0, enemyBaseMaxHp: mode === 'classic' ? 600 : 0,
+      version: PROTOCOL_VERSION, seed, mode, difficulty, time: 0, phase: 'lobby', paused: false, wave: 0,
+      countdown: 3, remaining: 0, reinforcementCountdown: 0, baseHp: 600, baseMaxHp: 600,
+      enemyBaseHp: mode === 'classic' ? DIFFICULTIES[difficulty].baseHp : 0, enemyBaseMaxHp: mode === 'classic' ? DIFFICULTIES[difficulty].baseHp : 0,
       tanks: [], obstacles: createMap(seed, mode), shells: [], drops: [], events: [],
     };
   }
@@ -65,15 +83,16 @@ export class Simulation {
     if (this.state.phase !== 'lobby') return;
     this.state.phase = 'intermission';
     this.state.countdown = 3;
+    if (this.state.mode === 'classic') this.state.remaining = reserveSize(this.state.difficulty, this.playerCount);
     this.addDrop('heal', -3, PLAYER_SPAWN_Z - 3);
     this.addDrop('rapid', 3, PLAYER_SPAWN_Z - 5);
   }
 
   private makeTank(id: string, name: string, team: Tank['team'], kind: Tank['kind']): Tank {
-    const hp = team === 'player' ? 120 : kind === 'scout' ? 80 : kind === 'heavy' ? 180 : 120;
+    const hp = team === 'player' ? 120 : DIFFICULTIES[this.state.difficulty].hp[kind];
     return {
       id, name, team, kind, color: 0, x: 0, z: 0, angle: 0, turret: 0, hp, maxHp: hp,
-      cooldown: 0, lives: 2, respawn: 0, shield: 0, buffs: { rapid: 0, burst: 0, heal: 0, armor: 0 },
+      cooldown: 0, warning: 0, lives: 2, respawn: 0, shield: 0, buffs: { rapid: 0, burst: 0, heal: 0, armor: 0 },
       score: 0, connected: true, ready: true,
     };
   }
@@ -97,6 +116,15 @@ export class Simulation {
     }
   }
 
+  private get playerCount() {
+    return this.state.tanks.filter(t => t.team === 'player' && t.connected).length;
+  }
+
+  private beginBatch() {
+    this.attackersToSpawn = Math.min(attackSize(this.state.difficulty, this.playerCount), this.state.remaining);
+    this.batchActive = true;
+  }
+
   private spawnEnemy() {
     const s = this.state;
     const classic = s.mode === 'classic';
@@ -115,12 +143,12 @@ export class Simulation {
     t.z = spawn.z;
     t.shield = 1.5;
     s.tanks.push(t);
-    // 经典模式保留驻守部队；其余敌军出击，阵地被攻破后停止增援。
-    if (classic && this.spawned % 3 === 0) this.guardPosts.set(t.id, spawn);
-    this.spawned++;
-    if (!classic) s.remaining--;
-    const players = s.tanks.filter(t => t.team === 'player' && t.connected).length;
-    this.spawnAt = s.time + (classic ? Math.max(3.5, 6.5 - (players - 1) * 0.7) : Math.max(2.2, 4.8 - s.wave * 0.35));
+    // 留一辆驻军，进攻部队整批消灭后才补下一批，驻军不会阻止休整。
+    if (classic && !s.tanks.some(other => other.hp > 0 && this.guardPosts.has(other.id)) && s.remaining > this.attackersToSpawn) this.guardPosts.set(t.id, spawn);
+    else if (classic) this.attackersToSpawn--;
+    s.remaining--;
+    this.attackersToSpawn = Math.min(this.attackersToSpawn, s.remaining);
+    this.spawnAt = s.time + (classic ? 4 : Math.max(2.5, 5 - s.wave * 0.3));
   }
 
   step(dt: number) {
@@ -133,15 +161,24 @@ export class Simulation {
       if (s.countdown <= 0) {
         s.wave++;
         s.phase = 'battle';
-        const count = s.tanks.filter(t => t.team === 'player' && t.connected).length;
-        s.remaining = s.mode === 'defense' ? 3 + s.wave * 2 + (count - 1) * (2 + s.wave) : 0;
+        if (s.mode === 'defense') s.remaining = waveSize(s.difficulty, s.wave, this.playerCount);
+        else this.beginBatch();
         this.spawnAt = s.time + 1;
         this.event('wave', 0, -ARENA.z + 12, s.wave);
       }
     }
-    const reinforcements = s.mode === 'classic' ? s.enemyBaseHp > 0 : s.remaining > 0;
-    const enemyLimit = s.mode === 'classic' ? Math.min(10, 4 + s.tanks.filter(t => t.team === 'player' && t.connected).length * 2) : 10;
-    if (s.phase === 'battle' && reinforcements && s.time >= this.spawnAt && s.tanks.filter(t => t.team === 'enemy' && t.hp > 0).length < enemyLimit) this.spawnEnemy();
+    if (s.mode === 'classic' && s.phase === 'battle' && s.enemyBaseHp > 0) {
+      if (this.batchActive && this.attackersToSpawn === 0 && !s.tanks.some(t => t.team === 'enemy' && t.hp > 0 && !this.guardPosts.has(t.id))) {
+        this.batchActive = false;
+        s.reinforcementCountdown = s.remaining > 0 ? DIFFICULTIES[s.difficulty].raidRest : 0;
+      } else if (s.reinforcementCountdown > 0) {
+        s.reinforcementCountdown = Math.max(0, s.reinforcementCountdown - dt);
+        if (s.reinforcementCountdown === 0) this.beginBatch();
+      }
+    }
+    const reinforcements = s.remaining > 0 && (s.mode === 'defense' || s.enemyBaseHp > 0 && this.batchActive && this.attackersToSpawn > 0);
+    if (s.phase === 'battle' && reinforcements && s.time >= this.spawnAt && s.tanks.filter(t => t.team === 'enemy' && t.hp > 0).length < enemyLimit(s.difficulty, this.playerCount)) this.spawnEnemy();
+    this.focus.clear();
     for (const t of s.tanks) {
       if (!t.connected) continue;
       t.cooldown = Math.max(0, t.cooldown - dt);
@@ -178,7 +215,11 @@ export class Simulation {
       if (input.fire && t.cooldown <= 0 && s.phase === 'battle') {
         const burst = t.buffs.burst > 0;
         this.fire(t, burst ? 12 : t.team === 'player' ? 20 : 14);
-        t.cooldown = t.team === 'player' ? t.buffs.rapid > 0 ? 0.7 : 1 : t.kind === 'heavy' ? 2 : 2.5;
+        const balance = DIFFICULTIES[s.difficulty];
+        t.cooldown = t.team === 'player' ? t.buffs.rapid > 0 ? 0.7 : 1 : t.kind === 'heavy' ? balance.heavyCooldown : balance.cooldown;
+        t.warning = 0;
+        const memory = this.memories.get(t.id);
+        if (memory) memory.shotAt = undefined;
         if (burst) this.bursts.push({ tank: t.id, at: s.time + 0.12, count: 2 });
       }
     }
@@ -213,7 +254,7 @@ export class Simulation {
       if (s.wave === WAVES) s.phase = 'won';
       else {
         s.phase = 'intermission';
-        s.countdown = 9;
+        s.countdown = DIFFICULTIES[s.difficulty].waveRest;
         s.baseHp = Math.min(s.baseMaxHp, s.baseHp + 45);
         this.addDrop('heal', -3, PLAYER_SPAWN_Z - 2);
         for (const o of s.obstacles) if (o.kind === 'wall' && o.team === 'player' && o.hp > 0) o.hp = Math.min(o.maxHp, o.hp + 20);
@@ -234,37 +275,97 @@ export class Simulation {
   }
 
   private enemyInput(t: Tank, dt: number): Input {
-    const players = this.state.tanks.filter(p => p.team === 'player' && p.connected && p.hp > 0);
-    const nearby = players.sort((a, b) => distance(a, t) - distance(b, t))[0];
+    const s = this.state;
+    const balance = DIFFICULTIES[s.difficulty];
     const post = this.guardPosts.get(t.id);
-    const intruder = nearby && distance(nearby, ENEMY_BASE) < 26 ? nearby : undefined;
-    const target = post ? intruder ?? post : nearby && distance(t, nearby) < (t.kind === 'scout' ? 10 : 20) ? nearby : BASE;
-    const returning = !!post && !intruder;
-    const aim = Math.atan2(target.x - t.x, target.z - t.z);
-    const obstruction = this.state.obstacles.filter(o => o.hp > 0 && segmentCircle(t.x, t.z, target.x, target.z, o.x, o.z, o.radius + 0.1) !== null)
+    let memory = this.memories.get(t.id);
+    if (!memory) {
+      memory = { searchUntil: 0, readyAt: 0, lockedAim: t.turret };
+      this.memories.set(t.id, memory);
+    }
+    const visible = s.tanks.filter(p => p.team === 'player' && p.connected && p.hp > 0 && distance(t, p) < 23 &&
+      (!post || distance(p, ENEMY_BASE) < 26) && this.canSee(t, p))
+      .sort((a, b) => distance(t, a) - distance(t, b));
+    // 每个玩家只有有限的交战名额，其余敌军推进或守营，避免全场集火。
+    const nearby = visible.find(p => (this.focus.get(p.id) ?? 0) < balance.focusLimit);
+    if (nearby) {
+      this.focus.set(nearby.id, (this.focus.get(nearby.id) ?? 0) + 1);
+      memory.lastSeen = { x: nearby.x, z: nearby.z };
+      memory.searchUntil = s.time + 3;
+    }
+    // 掩体后只保留最后目击位置；不再读取隐藏玩家的当前位置。
+    const searching = !nearby && memory.lastSeen && s.time < memory.searchUntil;
+    const target = nearby ?? (searching ? memory.lastSeen! : post ?? BASE);
+    const returning = !!post && !nearby && !searching;
+    const obstruction = s.obstacles.filter(o => o.hp > 0 && segmentCircle(t.x, t.z, target.x, target.z, o.x, o.z, o.radius + 0.1) !== null)
       .sort((a, b) => distance(a, t) - distance(b, t))[0];
     let path = this.paths.get(t.id);
-    if (!path || this.state.time >= path.at) {
-      path = { points: findPath(t, target, this.state.obstacles, this.state.mode), at: this.state.time + 1.3 + this.random() * 0.4 };
+    if (!path || s.time >= path.at) {
+      path = { points: findPath(t, target, s.obstacles, s.mode), at: s.time + 1.3 + this.random() * 0.4 };
       this.paths.set(t.id, path);
     }
     while (path.points.length > 1 && distance(t, path.points[0]) < 1.1) path.points.shift();
     const waypoint = path.points[0] ?? target;
     const turn = angleDiff(Math.atan2(waypoint.x - t.x, waypoint.z - t.z), t.angle);
-    const firingAt = obstruction && distance(obstruction, t) < 17 ? obstruction : target;
+    const firingAt = !nearby && obstruction && distance(obstruction, t) < 17 ? obstruction : target;
     const firingAim = Math.atan2(firingAt.x - t.x, firingAt.z - t.z);
     const hiddenByGround = !returning && distance(t, firingAt) < 23 && terrainIntersection(
       { x: t.x, y: groundHeight(t.x, t.z) + SHOT_HEIGHT, z: t.z },
       { x: firingAt.x, y: groundHeight(firingAt.x, firingAt.z) + 1, z: firingAt.z },
     ) !== null;
-    // 坡后目标不可见时继续接近，不在山脚停车反复射击地面。
-    const throttle = distance(t, target) > (returning ? 1.5 : hiddenByGround ? 2.8 : 9) || (!returning && obstruction) ? Math.abs(turn) < 1.2 ? 1 : 0.15 : 0;
-    // 敌军保留沿寻路路线转向的驾驶方式，玩家方向控制不改变其行为。
+    const throttle = distance(t, target) > (returning ? 1.5 : hiddenByGround || searching ? 2.8 : 9) || (!returning && obstruction) ? Math.abs(turn) < 1.2 ? 1 : 0.15 : 0;
     t.angle += clamp(turn * 2, -1, 1) * dt * (t.kind === 'heavy' ? 1.3 : 1.9);
+    const lineHit = traceShot(s, t.team,
+      { x: t.x, y: groundHeight(t.x, t.z) + SHOT_HEIGHT, z: t.z },
+      { x: firingAt.x, y: groundHeight(firingAt.x, firingAt.z) + 1, z: firingAt.z });
+    const unassignedPlayer = lineHit?.target?.type === 'tank' && lineHit.target.id !== nearby?.id;
+    const canFire = !unassignedPlayer && s.phase === 'battle' && !returning && !searching && !hiddenByGround && distance(t, firingAt) < 23;
+    const aimTarget = nearby ? nearby.id : obstruction ? 'obstacle-' + obstruction.id : 'base';
+    if (!canFire) {
+      memory.aimTarget = undefined;
+      memory.shotAt = undefined;
+    } else if (memory.aimTarget !== aimTarget) {
+      memory.aimTarget = aimTarget;
+      memory.readyAt = s.time + balance.reaction[0] + this.random() * (balance.reaction[1] - balance.reaction[0]);
+      memory.shotAt = undefined;
+    }
+    if (canFire && memory.shotAt === undefined && t.shield <= 0 && t.cooldown <= balance.warningTime &&
+      s.time >= memory.readyAt - balance.warningTime && Math.abs(angleDiff(t.turret, firingAim)) < 0.12) {
+      memory.shotAt = Math.max(memory.readyAt, s.time + balance.warningTime, s.time + t.cooldown);
+      // 预警期间锁定这一发的方向，给玩家看到闪光后躲开的机会。
+      memory.lockedAim = firingAim;
+    }
+    t.warning = memory.shotAt === undefined ? 0 : clamp(1 - (memory.shotAt - s.time) / balance.warningTime, 0.05, 1);
     return {
-      moveX: Math.sin(t.angle) * throttle, moveZ: Math.cos(t.angle) * throttle, aim: firingAim,
-      fire: !returning && !hiddenByGround && distance(t, firingAt) < 23 && Math.abs(angleDiff(t.turret, obstruction ? firingAim : aim)) < 0.12,
+      moveX: Math.sin(t.angle) * throttle, moveZ: Math.cos(t.angle) * throttle,
+      aim: memory.shotAt === undefined ? firingAim : memory.lockedAim,
+      fire: canFire && memory.shotAt !== undefined && s.time >= memory.shotAt && Math.abs(angleDiff(t.turret, memory.lockedAim)) < 0.12,
     };
+  }
+
+  private canSee(t: Tank, target: Tank) {
+    const hit = traceShot(this.state, t.team,
+      { x: t.x, y: groundHeight(t.x, t.z) + SHOT_HEIGHT, z: t.z },
+      { x: target.x, y: groundHeight(target.x, target.z) + 1, z: target.z });
+    return hit?.target?.type === 'tank' && hit.target.id === target.id;
+  }
+
+  private repairDrop(killer: Tank | undefined) {
+    const players = this.state.tanks.filter(t => t.team === 'player' && t.connected && t.hp > 0);
+    const recipient = killer?.team === 'player' && killer.hp > 0 && killer.connected ? killer : players.sort((a, b) => a.hp / a.maxHp - b.hp / b.maxHp)[0];
+    if (!recipient) return;
+    // 从玩家身边沿无障碍短线放置；找不到空地就放脚下，确保维修包可达。
+    for (let i = 0; i < 12; i++) {
+      const angle = recipient.angle + Math.PI + i * Math.PI / 6;
+      const x = recipient.x + Math.sin(angle) * 2.8;
+      const z = recipient.z + Math.cos(angle) * 2.8;
+      if (Array.from({ length: 8 }, (_, j) => (j + 1) / 8).every(at =>
+        !blocked(recipient.x + (x - recipient.x) * at, recipient.z + (z - recipient.z) * at, this.state.obstacles, 0.85, this.state.mode))) {
+        this.state.drops.push({ id: this.nextId++, kind: 'heal', x, z, life: 60 });
+        return;
+      }
+    }
+    this.state.drops.push({ id: this.nextId++, kind: 'heal', x: recipient.x, z: recipient.z, life: 60 });
   }
 
   private fire(t: Tank, damage: number) {
@@ -326,12 +427,14 @@ export class Simulation {
         const killer = this.state.tanks.find(t => t.id === shell.owner);
         if (killer) killer.score += t.kind === 'heavy' ? 300 : t.kind === 'scout' ? 120 : 180;
         if (t.team === 'player' && t.lives > 0) { t.lives--; t.respawn = 5; }
-        if (t.team === 'enemy' && this.random() < 0.4) {
+        if (t.team === 'enemy' && ++this.enemyKills % 3 === 0) this.repairDrop(killer);
+        else if (t.team === 'enemy' && this.random() < 0.4) {
           const kinds: Power[] = ['heal', 'rapid', 'burst', 'armor'];
           this.addDrop(kinds[Math.floor(this.random() * 4)], t.x, t.z);
         }
         this.paths.delete(t.id);
         this.guardPosts.delete(t.id);
+        this.memories.delete(t.id);
       }
     }
   }

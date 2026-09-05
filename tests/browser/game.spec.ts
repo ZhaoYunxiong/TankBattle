@@ -69,7 +69,7 @@ test('手机竖屏、横屏和双拇指输入', async ({ browser }) => {
   await expect.poll(() => page.evaluate(() => (window as any).__tankBattle.state.phase)).toBe('battle');
   expect(await page.evaluate(() => (window as any).__tankBattle.state.mode)).toBe('classic');
   await expect(page.locator('#enemyBaseCard')).toBeVisible();
-  await expect(page.locator('#enemyBaseHp')).toHaveText('600 / 600');
+  await expect(page.locator('#enemyBaseHp')).toHaveText('360 / 360');
   await expect(page.locator('#pickupLabels [data-power="heal"]')).toContainText('满血无需维修');
   await expect.poll(() => page.evaluate(() => (window as any).__tankBattle.camera.position.y)).toBeGreaterThan(13);
   const before = await page.evaluate(() => (window as any).__tankBattle.state.tanks[0]);
@@ -127,6 +127,7 @@ test('手机创建房间，第二位玩家通过真实 WebRTC 同步战场', asy
   guest.on('pageerror', e => errors.push(e.message));
   await host.goto('./');
   await host.locator('#playerName').fill('房主坦克');
+  await host.locator('#difficulty').selectOption('casual');
   await host.locator('#hostButton').tap();
   await expect(host.locator('#lobbyDialog')).toBeVisible({ timeout: 25000 });
   await expect(host.locator('#lobbyMode')).toContainText('经典模式');
@@ -147,7 +148,10 @@ test('手机创建房间，第二位玩家通过真实 WebRTC 同步战场', asy
   const guestState = await guest.evaluate(() => (window as any).__tankBattle.state);
   expect(hostState.seed).toBe(guestState.seed);
   expect(new TextEncoder().encode(JSON.stringify(hostState)).length).toBeGreaterThan(16300);
-  expect(guestState.version).toBe(4);
+  expect(guestState.version).toBe(5);
+  expect(guestState.difficulty).toBe('casual');
+  expect(guestState.enemyBaseMaxHp).toBe(280);
+  await expect(guest.locator('#difficultyBadge')).toHaveText('休闲');
   expect(hostState.mode).toBe('classic');
   expect(guestState.mode).toBe(hostState.mode);
   expect(guestState.enemyBaseHp).toBe(hostState.enemyBaseHp);
