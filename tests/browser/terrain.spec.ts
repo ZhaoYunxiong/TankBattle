@@ -35,19 +35,30 @@ for (const mobile of [false, true]) test((mobile ? '手机' : '桌面') + '坡�
       await cdp.send('Input.dispatchTouchEvent', { type: 'touchStart', touchPoints: [{ x: axis === 'x' ? stick.x + 10 : stick.x + stick.width / 2, y: axis === 'z' ? stick.y + 10 : stick.y + stick.height / 2, id: 1 }] });
     } else await page.keyboard.down(axis === 'x' ? 'KeyA' : 'KeyW');
     try {
-      sample = await page.waitForFunction(({ axis, target }) => {
+      sample = await page.waitForFunction(({ axis, target, mobile }) => {
         const diagnostics = (window as any).__tankBattle;
         const tank = diagnostics.state.tanks[0];
-        // 在驶过目标位置的当帧记录姿态；慢速远程驱动的松键延迟可能让坦克继续驶上平坦台地。
-        return (axis === 'x' ? tank.x >= target : tank.z <= target) ? { vehicle: diagnostics.vehicle, camera: diagnostics.camera, terrain: diagnostics.terrain } : false;
-      }, { axis, target }, { timeout: process.env.CI ? 90000 : 25000 });
+        if (!(axis === 'x' ? tank.x >= target : tank.z <= target)) return false;
+        // 在目标帧经正常键盘事件入口松键，避免 CI 的 RPC 延迟让车辆驶离横向道路。
+        // 走 Controls 的正常 keyup 入口，随后再释放浏览器驱动器保存的按键状态。
+        if (!mobile) window.dispatchEvent(new KeyboardEvent('keyup', { code: axis === 'x' ? 'KeyA' : 'KeyW', bubbles: true }));
+        return { vehicle: diagnostics.vehicle, camera: diagnostics.camera, terrain: diagnostics.terrain };
+      }, { axis, target, mobile }, { timeout: process.env.CI ? 90000 : 25000 });
     } finally {
       if (cdp) await cdp.send('Input.dispatchTouchEvent', { type: 'touchEnd', touchPoints: [] });
-      else await page.keyboard.up(axis === 'x' ? 'KeyA' : 'KeyW');
+      else {
+        // 固定延迟用于重现云端松键滞后，验证坦克不会在等待驱动器期间越过目标路段。
+        await page.waitForTimeout(650);
+        await page.keyboard.up(axis === 'x' ? 'KeyA' : 'KeyW');
+      }
     }
     const result = await sample.jsonValue();
     await sample.dispose();
     if (!result) throw new Error('未读取到目标位置的行驶状态');
+    if (!mobile) {
+      const stopped = await page.evaluate(axis => (window as any).__tankBattle.state.tanks[0][axis], axis);
+      expect(Math.abs(stopped - target)).toBeLessThan(1.5);
+    }
     return result;
   };
   await drive('z', 24);
