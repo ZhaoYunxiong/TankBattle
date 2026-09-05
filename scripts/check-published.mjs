@@ -24,9 +24,14 @@ try {
   assert.equal(await page.evaluate(() => document.documentElement.scrollWidth <= innerWidth), true);
   assert.equal(await page.locator('#modeName').textContent(), '经典模式');
   assert.equal(await page.locator('#enemyBaseCard').isVisible(), true);
+  assert.equal(await page.locator('.player-card').count(), 0);
+  assert.equal(await page.locator('#localTankStatus').isVisible(), true);
+  assert.equal(await page.locator('#score').isVisible(), false);
   assert.match(await page.locator('#pickupLabels [data-power=heal]').textContent(), /满血无需维修/);
   await page.screenshot({ path: 'artifacts/published-battle.png' });
   await page.locator('#pauseButton').tap();
+  assert.equal(await page.locator('#lives').isVisible(), true);
+  assert.equal(await page.locator('#score').isVisible(), true);
   await page.locator('#backMenu').tap();
   await page.locator('#modeDefense').tap();
   await page.locator('#soloButton').tap();

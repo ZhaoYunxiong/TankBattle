@@ -120,6 +120,8 @@ test('手机创建房间，第二位玩家通过真实 WebRTC 同步战场', asy
   const guestContext = await browser.newContext({ viewport: { width: 390, height: 844 }, isMobile: true, hasTouch: true, deviceScaleFactor: 1 });
   const host = await hostContext.newPage();
   const guest = await guestContext.newPage();
+  // 使用确定超过旧 JSON 通道上限的大地图，覆盖完整战场快照的传输回归。
+  await host.addInitScript(() => { Math.random = () => 47 / 0x7fffffff; });
   const errors: string[] = [];
   host.on('pageerror', e => errors.push(e.message));
   guest.on('pageerror', e => errors.push(e.message));
@@ -144,6 +146,8 @@ test('手机创建房间，第二位玩家通过真实 WebRTC 同步战场', asy
   const hostState = await host.evaluate(() => (window as any).__tankBattle.state);
   const guestState = await guest.evaluate(() => (window as any).__tankBattle.state);
   expect(hostState.seed).toBe(guestState.seed);
+  expect(new TextEncoder().encode(JSON.stringify(hostState)).length).toBeGreaterThan(16300);
+  expect(guestState.version).toBe(4);
   expect(hostState.mode).toBe('classic');
   expect(guestState.mode).toBe(hostState.mode);
   expect(guestState.enemyBaseHp).toBe(hostState.enemyBaseHp);

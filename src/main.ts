@@ -3,9 +3,10 @@ import QRCode from 'qrcode';
 import { Simulation } from './game/simulation';
 import { BattleRenderer } from './game/renderer';
 import { CAMERA } from './game/camera';
+import { groundHeight, groundSlope } from './game/terrain';
 import { Controls } from './controls';
 import { Rooms } from './network';
-import { ARENA, BASE, ENEMY_BASE, COLORS, distance, groundHeight, MODES, pickupHint, POWER_LABELS, WAVES, type GameMode, type Power, type State } from './game/types';
+import { ARENA, BASE, ENEMY_BASE, COLORS, distance, MODES, pickupHint, POWER_LABELS, WAVES, type GameMode, type Power, type State } from './game/types';
 
 const icons: Record<string, string> = {
   tank: '<rect x="3" y="9" width="4" height="11" rx="1"/><rect x="17" y="9" width="4" height="11" rx="1"/><rect x="7" y="11" width="10" height="7" rx="2"/><circle cx="12" cy="10" r="4"/><path d="M12 2v8"/>',
@@ -31,16 +32,16 @@ get('app').innerHTML = '<main id="menu" class="menu-screen">' +
   '<section class="hero"><div class="eyebrow">A LITTLE VALLEY. A BIG ADVENTURE.</div><h1><span>山谷</span><span>守卫</span></h1><p class="hero-description">穿过山林，击破险阻。<br>驾驶你的坦克，守住这一方小小天地。</p><fieldset class="mode-picker"><legend>选择游戏模式</legend><div class="mode-options"><button id="modeClassic" type="button" data-mode="classic" aria-pressed="true"><span><b>经典模式</b><i>默认</i></span><small>双方阵地 · 进攻与回防</small></button><button id="modeDefense" type="button" data-mode="defense" aria-pressed="false"><span><b>防守模式</b></span><small>守护营地 · 抵御五波敌军</small></button></div></fieldset><label class="player-name">呼号<input id="playerName" maxlength="16" autocomplete="nickname" aria-label="玩家昵称"></label><button id="soloButton" class="primary solo-button"><span>开始单人战役</span>' + icon('arrow') + '</button><div class="button-row"><button id="hostButton" class="secondary">' + icon('team') + '创建房间</button><button id="joinButton" class="secondary">' + icon('join') + '加入房间</button></div><div class="menu-meta"><span>第三人称 · 自由视角</span><i></i><span>1—4 人合作</span></div></section>' +
   '<div class="scene-label"><span>CAMPAIGN / 01</span><b>薄雾山谷</b><p>山林之间，营地长明。</p></div><footer class="menu-footer"><button id="helpButton" class="help-link">操作手册 ↗</button><span>为每一位童年的坦克手</span><a href="https://github.com/ZhaoYunxiong/TankBattle" target="_blank" rel="noreferrer">GITHUB ↗</a></footer></main>' +
   '<section id="hud" class="hud" hidden><div class="hud-top"><div class="camp-status"><div class="camp-card glass"><div class="hud-caption"><span>⌂ 己方营地</span><b id="baseHp">600 / 600</b></div><div class="bar"><i id="baseBar"></i></div></div><div id="enemyBaseCard" class="camp-card enemy-camp-card glass"><div class="hud-caption"><span>⚑ 敌军营地</span><b id="enemyBaseHp">600 / 600</b></div><div class="bar"><i id="enemyBaseBar"></i></div></div></div><div class="wave"><span id="modeName">经典模式</span><b id="wave">01 / 05</b><small id="enemyCount">准备出击</small></div><div class="hud-tools"><button id="pauseButton" class="icon-button" aria-label="暂停">' + icon('pause') + '</button><button class="icon-button fullscreen-button" aria-label="全屏">' + icon('fullscreen') + '</button></div></div>' +
-  '<div class="radar glass"><canvas id="radar" width="160" height="160" aria-label="战场小地图"></canvas><span id="roomBadge">单人战役 · N ↑</span></div><div class="player-card glass"><div class="hud-caption"><span id="tankName">守卫者</span><b id="tankHp">120 / 120</b></div><div class="bar"><i id="tankBar"></i></div><div class="player-detail"><span id="damageStatus">装甲完好</span><strong id="lives">备用 × 2</strong></div><div class="player-detail"><span>战役得分</span><strong id="score">0000</strong></div></div>' +
+  '<div class="radar glass"><canvas id="radar" width="160" height="160" aria-label="战场小地图"></canvas><span id="roomBadge">单人战役 · N ↑</span></div><div id="localTankStatus" class="local-tank-status" hidden><span id="tankHp">120 / 120</span><div id="tankHealth" class="bar" role="meter" aria-label="我方坦克血量" aria-valuemin="0" aria-valuemax="120" aria-valuenow="120"><i id="tankBar"></i></div><small id="damageStatus" hidden></small></div>' +
   '<div id="buffs" class="buffs"></div><div class="keyboard-help">W A S D / 方向键移动 · 鼠标瞄准 · 按住左键开火<br>单击战场锁定鼠标 · Alt 自由观察 · C 镜头归位 · Esc 暂停</div><div class="weapon-card glass"><b id="weaponStatus">炮弹就绪</b><small>标准炮 · 按住连续射击</small><div class="bar"><i id="reloadBar"></i></div></div><div id="crosshair" class="crosshair"></div><div id="enemyLabels"></div><div id="pickupLabels"></div><div id="objective" class="objective" hidden></div><div id="connectionStatus" class="connection-status" hidden></div>' +
   '<div class="touch-controls"><div id="joystick" role="group" aria-label="驾驶摇杆"><span></span></div><button id="fireButton" aria-label="按住开火并拖动瞄准">' + icon('target') + '<small id="touchReload">开火</small></button><div class="camera-buttons"><button id="zoomIn" class="icon-button" aria-label="拉近镜头">＋</button><button id="zoomOut" class="icon-button" aria-label="拉远镜头">−</button><button id="freeLook" class="icon-button" aria-label="切换自由观察">' + icon('camera') + '</button></div></div></section>' +
   '<div id="toast" role="status" aria-live="polite" hidden></div>' +
   '<dialog id="joinDialog"><div class="dialog-content"><div class="dialog-header"><h2>加入小队</h2><button class="icon-button" data-close="joinDialog" aria-label="关闭">' + icon('close') + '</button></div><p>输入朋友分享的房间号。所有人都可以用手机开房或加入，房主需保持游戏在前台。</p><label for="roomInput">六位房间号</label><input id="roomInput" class="room-input" maxlength="6" autocomplete="off" autocapitalize="characters" spellcheck="false" placeholder="ABC234"><button id="connectButton" class="primary">加入房间</button><p id="joinStatus" role="status">同一 Wi-Fi 更容易直连。跨网络连接取决于网络环境。</p></div></dialog>' +
   '<dialog id="lobbyDialog"><div class="dialog-content"><div class="dialog-header"><h2>山谷小队</h2><button id="leaveLobby" class="icon-button" aria-label="离开房间">' + icon('close') + '</button></div><div class="room-code"><div><small>邀请朋友，一起守卫</small><strong id="roomCode"></strong></div><img id="roomQr" alt="扫码加入房间"></div><button id="copyRoom" class="text-button">复制邀请链接 ↗</button><div id="lobbyMode" class="lobby-mode"><b></b><span></span><small>模式由房主在创建房间前选择</small></div><div id="players" class="players"></div><button id="startRoom" class="primary">开始守卫</button><button id="readyButton" class="primary" hidden>我准备好了</button><p id="lobbyStatus">正在等待队友。最多 4 人，房主也可以独自出发。</p><p>房主切到后台会暂停战场；离开房间会结束本次联机。开房使用公共配对服务，战场通过设备直连同步。</p></div></dialog>' +
   '<dialog id="settingsDialog"><div class="dialog-content"><div class="dialog-header"><h2>游戏设置</h2><button id="closeSettings" class="icon-button" aria-label="关闭设置">' + icon('close') + '</button></div><label class="setting"><span>画面质量</span><select id="quality"><option value="auto">自动平衡</option><option value="low">省电流畅</option><option value="high">细腻画面</option></select></label><label class="setting"><span>炮击与爆炸震动</span><input id="shake" type="checkbox"></label><label class="setting"><span>战场音效</span><input id="sound" type="checkbox"></label><p>手机发热或画面卡顿时，可选择省电流畅。横屏拥有更宽的战场视野，竖屏同样可以游玩。</p><button id="settingsDone" class="primary">完成</button></div></dialog>' +
-  '<dialog id="pauseDialog"><div class="dialog-content"><div class="dialog-header"><h2>稍作休整</h2></div><p id="pauseText">战场已暂停，准备好后继续出发。</p><button id="resumeButton" class="primary">继续战斗</button><button id="pauseSettings" class="secondary">游戏设置</button><button id="backMenu" class="text-button">返回大厅</button></div></dialog>' +
+  '<dialog id="pauseDialog"><div class="dialog-content"><div class="dialog-header"><h2>稍作休整</h2></div><div class="pause-player-stats"><span id="lives">备用 × 2</span><span>得分 <b id="score">0000</b></span></div><p id="pauseText">战场已暂停，准备好后继续出发。</p><button id="resumeButton" class="primary">继续战斗</button><button id="pauseSettings" class="secondary">游戏设置</button><button id="backMenu" class="text-button">返回大厅</button></div></dialog>' +
   '<dialog id="resultDialog"><div class="dialog-content result"><div class="result-emblem" id="resultEmblem">◇</div><h2 id="resultTitle">山谷依旧长明</h2><p id="resultDescription"></p><div class="result-stats"><div><b id="resultScore">0</b><small>小队得分</small></div><div><b id="resultWave">0</b><small id="resultProgressLabel">战役进度</small></div><div><b id="resultTime">0:00</b><small>守卫时间</small></div></div><button id="retryButton" class="primary">再次出征</button><button id="resultMenu" class="text-button">返回大厅</button></div></dialog>' +
-  '<dialog id="helpDialog"><div class="dialog-content"><div class="dialog-header"><h2>坦克手册</h2><button class="icon-button" data-close="helpDialog" aria-label="关闭手册">' + icon('close') + '</button></div><p>经典模式：守住己方营地，摧毁敌军营地获胜；防守模式：击退五波来袭敌军。两种模式均可单人或合作，坦克被击毁后可使用两辆备用坦克，己方营地被毁则战役结束。</p><table class="help-table"><tr><td>电脑驾驶</td><td>WASD / 方向键按镜头方向移动，车身自动转向</td></tr><tr><td>电脑瞄准</td><td>单击战场锁定鼠标；拖动/鼠标移动瞄准，左键或空格开火</td></tr><tr><td>自由镜头</td><td>滚轮缩放，Alt 只观察，C 归位</td></tr><tr><td>手机操作</td><td>左摇杆推向哪里就往哪里走，右侧拖动瞄准；按住开火按钮也能拖动</td></tr><tr><td>受损坦克</td><td>低于 60% 开始冒烟、减速、散布增加；维修后恢复</td></tr><tr><td>战术破坏</td><td>炸开树木和岩壁开辟捷径，敌军也能利用缺口</td></tr><tr><td>战场补给</td><td>绿：回血（满血时保留）；黄：快装；橙：连发；蓝：减伤。靠近箱子可查看效果，驶过即可拾取</td></tr></table><p>合作模式没有队友伤害，也不会误伤本方围墙；经典模式可以摧毁敌军围墙。跨网络直连可能受运营商限制；同一可互访 Wi-Fi 下更适合一起游玩。</p></div></dialog>';
+  '<dialog id="helpDialog"><div class="dialog-content"><div class="dialog-header"><h2>坦克手册</h2><button class="icon-button" data-close="helpDialog" aria-label="关闭手册">' + icon('close') + '</button></div><p>经典模式：守住己方营地，摧毁敌军营地获胜；防守模式：击退五波来袭敌军。两种模式均可单人或合作，坦克被击毁后可使用两辆备用坦克，己方营地被毁则战役结束。</p><table class="help-table"><tr><td>电脑驾驶</td><td>WASD / 方向键按镜头方向移动，车身自动转向</td></tr><tr><td>电脑瞄准</td><td>单击战场锁定鼠标；拖动/鼠标移动瞄准，左键或空格开火</td></tr><tr><td>自由镜头</td><td>滚轮缩放，Alt 只观察，C 归位</td></tr><tr><td>手机操作</td><td>左摇杆推向哪里就往哪里走，右侧拖动瞄准；按住开火按钮也能拖动</td></tr><tr><td>受损坦克</td><td>低于 60% 开始冒烟、减速、散布增加；维修后恢复</td></tr><tr><td>山谷地形</td><td>中央谷道与两侧高地由缓坡连通；上坡略慢，山坡可挡炮。瞄准目标时炮管自动适配高低差</td></tr><tr><td>战术破坏</td><td>炸开树木和岩壁开辟捷径，敌军也能利用缺口</td></tr><tr><td>战场补给</td><td>绿：回血（满血时保留）；黄：快装；橙：连发；蓝：减伤。靠近箱子可查看效果，驶过即可拾取</td></tr></table><p>合作模式没有队友伤害，也不会误伤本方围墙；经典模式可以摧毁敌军围墙。跨网络直连可能受运营商限制；同一可互访 Wi-Fi 下更适合一起游玩。</p></div></dialog>';
 
 let renderer: BattleRenderer;
 try {
@@ -342,11 +343,25 @@ document.addEventListener('visibilitychange', () => {
   if (document.hidden && screen === 'game' && !resultShown) pause();
 });
 
+let radarTerrain: HTMLCanvasElement | undefined;
+
 function drawRadar() {
   const ctx = get<HTMLCanvasElement>('radar').getContext('2d')!;
   ctx.clearRect(0, 0, 160, 160);
   const scale = Math.min(140 / (ARENA.x * 2), 144 / (ARENA.z * 2));
   const position = (x: number, z: number) => [80 + x * scale, 80 + z * scale];
+  if (!radarTerrain) {
+    radarTerrain = document.createElement('canvas');
+    radarTerrain.width = radarTerrain.height = 160;
+    const land = radarTerrain.getContext('2d')!;
+    for (let z = -ARENA.z; z < ARENA.z; z += 2) for (let x = -ARENA.x; x < ARENA.x; x += 2) {
+      const height = groundHeight(x + 1, z + 1);
+      land.fillStyle = height > 5 ? '#b2c19670' : height > 1 ? '#b2a58450' : '#5c796548';
+      const p = position(x, z);
+      land.fillRect(p[0], p[1], 2 * scale + 0.2, 2 * scale + 0.2);
+    }
+  }
+  ctx.drawImage(radarTerrain, 0, 0);
   ctx.strokeStyle = '#e8e2bc33';
   ctx.lineWidth = 1;
   ctx.strokeRect(80 - ARENA.x * scale, 80 - ARENA.z * scale, ARENA.x * 2 * scale, ARENA.z * 2 * scale);
@@ -405,11 +420,14 @@ function updateHud() {
   get('enemyBaseBar').style.width = (state.enemyBaseMaxHp > 0 ? Math.max(0, state.enemyBaseHp / state.enemyBaseMaxHp * 100) : 0) + '%';
   get('wave').textContent = state.mode === 'classic' ? '攻破敌营' : String(Math.max(1, state.wave)).padStart(2, '0') + ' / 0' + WAVES;
   get('enemyCount').textContent = state.phase === 'battle' ? '敌军 ' + enemies.length + (state.mode === 'classic' ? ' · 敌营 ' + Math.round(distance(player, ENEMY_BASE)) + 'm' : ' · 后续 ' + state.remaining) : state.mode === 'classic' ? '准备出征' : '下一波前的休整';
-  get('tankName').textContent = player.name;
   get('tankHp').textContent = Math.ceil(player.hp) + ' / ' + player.maxHp;
   get('tankBar').style.width = player.hp / player.maxHp * 100 + '%';
   get('tankBar').style.background = player.hp < 36 ? '#e9a185' : '#c1d4a5';
-  get('damageStatus').textContent = player.hp <= 0 ? '坦克已被击毁' : player.hp < 36 ? '严重受损 · 减速 / 散布' : player.hp < 72 ? '装甲受损 · 轻度减速' : player.shield > 0 ? '出战保护' : '装甲完好';
+  get('damageStatus').hidden = player.hp >= 72 || player.hp <= 0;
+  get('damageStatus').textContent = player.hp < 36 ? '重损 · 减速 / 散布' : '受损 · 减速';
+  get('localTankStatus').classList.toggle('damaged', player.hp < 72);
+  get('tankHealth').setAttribute('aria-valuenow', String(Math.ceil(player.hp)));
+  get('tankHealth').setAttribute('aria-valuemax', String(player.maxHp));
   get('lives').textContent = '备用 × ' + player.lives;
   get('score').textContent = String(player.score).padStart(4, '0');
   get('weaponStatus').textContent = player.cooldown > 0 ? '装填 ' + player.cooldown.toFixed(1) + 's' : '炮弹就绪';
@@ -477,6 +495,12 @@ renderer.engine.runRenderLoop(() => {
   get('boot')?.remove();
   if (screen === 'game') {
     const player = state.tanks.find(t => t.id === localId);
+    const health = player && player.hp > 0 ? renderer.project(player.x, groundHeight(player.x, player.z) + 2.5, player.z) : null;
+    get('localTankStatus').hidden = !health?.visible;
+    if (health?.visible) {
+      get('localTankStatus').style.left = Math.max(44, Math.min(innerWidth - 44, health.x)) + 'px';
+      get('localTankStatus').style.top = health.y + 'px';
+    }
     if (player && player.hp > 0) {
       const p = renderer.reticle(state, player);
       get('crosshair').hidden = !p.visible;
@@ -494,7 +518,7 @@ renderer.engine.runRenderLoop(() => {
       labels.push('<div class="enemy-label" style="left:' + p.x + 'px;top:' + p.y + 'px">' + (t.team === 'player' ? escape(t.name) : '') + '<div class="bar"><i style="width:' + t.hp / t.maxHp * 100 + '%;' + (t.team === 'player' ? 'background:#bbdcc4' : '') + '"></i></div></div>');
     }
     if (state.mode === 'classic' && state.enemyBaseHp > 0 && player && distance(player, ENEMY_BASE) < 38) {
-      const p = renderer.project(ENEMY_BASE.x, 4.5, ENEMY_BASE.z);
+      const p = renderer.project(ENEMY_BASE.x, groundHeight(ENEMY_BASE.x, ENEMY_BASE.z) + 4.5, ENEMY_BASE.z);
       // 靠近屏幕顶部时使用固定营地血条，避免悬浮标签与模式标题重叠。
       if (p.visible && p.y > 130) labels.push('<div class="enemy-label camp-label" style="left:' + p.x + 'px;top:' + p.y + 'px">敌军营地<div class="bar"><i style="width:' + state.enemyBaseHp / state.enemyBaseMaxHp * 100 + '%"></i></div></div>');
     }
@@ -505,8 +529,9 @@ renderer.engine.runRenderLoop(() => {
       const p = renderer.project(drop.x, groundHeight(drop.x, drop.z) + 1.9, drop.z);
       if (!p.visible) continue;
       const x = Math.max(80, Math.min(innerWidth - 80, p.x));
+      const y = health?.visible && Math.abs(x - health.x) < 120 && Math.abs(p.y - health.y) < 70 ? Math.min(p.y, health.y - 45) : p.y;
       const full = drop.kind === 'heal' && player.hp >= player.maxHp;
-      supplies.push('<div class="pickup-label' + (full ? ' unavailable' : '') + '" data-power="' + drop.kind + '" style="left:' + x + 'px;top:' + p.y + 'px"><b>' + POWER_LABELS[drop.kind] + '</b><small>' + pickupHint(drop.kind, player) + '</small></div>');
+      supplies.push('<div class="pickup-label' + (full ? ' unavailable' : '') + '" data-power="' + drop.kind + '" style="left:' + x + 'px;top:' + y + 'px"><b>' + POWER_LABELS[drop.kind] + '</b><small>' + pickupHint(drop.kind, player) + '</small></div>');
     }
     get('pickupLabels').innerHTML = supplies.join('');
     hudClock += dt;
@@ -522,5 +547,11 @@ if (invited && /^[A-Z2-9]{6}$/i.test(invited)) {
 // 开发环境仅提供只读诊断入口，用于验证真实渲染与网络状态；生产构建会移除。
 if (import.meta.env.DEV) Object.defineProperty(window, '__tankBattle', { get: () => ({
   state: JSON.parse(JSON.stringify(state)), localId, role: rooms.role, fps,
+  vehicle: (() => {
+    const root = renderer.scene.getTransformNodeByName(localId);
+    const chassis = root?.getChildTransformNodes(true).find(n => n.name === 'suspension');
+    return root && chassis ? { position: { x: root.position.x, y: root.position.y, z: root.position.z }, pitch: chassis.rotation.x, roll: chassis.rotation.z } : null;
+  })(),
+  terrain: { size: { x: ARENA.x * 2, z: ARENA.z * 2 }, tanks: state.tanks.map(t => ({ id: t.id, height: groundHeight(t.x, t.z), slope: groundSlope(t.x, t.z) })), cameraGround: groundHeight(renderer.camera.position.x, renderer.camera.position.z) },
   camera: { yaw: renderer.yaw, pitch: renderer.pitch, zoom: renderer.zoom, position: { x: renderer.camera.position.x, y: renderer.camera.position.y, z: renderer.camera.position.z } }, screen,
 }) });

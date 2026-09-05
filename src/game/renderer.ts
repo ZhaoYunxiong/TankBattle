@@ -11,13 +11,15 @@ import { ShadowGenerator } from '@babylonjs/core/Lights/Shadows/shadowGenerator'
 import '@babylonjs/core/Lights/Shadows/shadowGeneratorSceneComponent';
 import { StandardMaterial } from '@babylonjs/core/Materials/standardMaterial';
 import { TransformNode } from '@babylonjs/core/Meshes/transformNode';
-import { VertexBuffer } from '@babylonjs/core/Buffers/buffer';
-import { angleDiff, ARENA, BASE, ENEMY_BASE, clamp, COLORS, distance, groundHeight, type BattleEvent, type GameMode, type Obstacle, type State, type Tank } from './types';
+import { VertexData } from '@babylonjs/core/Meshes/mesh.vertexData';
+import { angleDiff, ARENA, BASE, ENEMY_BASE, CROSSINGS, SIDE_LANE, clamp, COLORS, distance, type BattleEvent, type GameMode, type Obstacle, type State, type Tank } from './types';
 import { seededRandom, segmentCircle } from './world';
 import { BattleAudio } from './audio';
 import { CAMERA } from './camera';
+import { groundHeight, groundSlope, terrainVertex, terrainIntersection, TERRAIN_STEP } from './terrain';
+import { SHOT_HEIGHT, shotSlope, traceShot } from './combat';
 
-type TankVisual = { root: TransformNode; turret: TransformNode; barrel: Mesh; body: Mesh; shield: Mesh };
+type TankVisual = { root: TransformNode; chassis: TransformNode; gun: TransformNode; turret: TransformNode; barrel: Mesh; body: Mesh; shield: Mesh };
 
 type Particle = { mesh: Mesh; vx: number; vy: number; vz: number; life: number; max: number; grow: number };
 
@@ -77,11 +79,11 @@ export class BattleRenderer {
     this.scene.ambientColor = Color3.FromHexString('#d6ddcf');
     this.scene.fogMode = Scene.FOGMODE_LINEAR;
     this.scene.fogColor = Color3.FromHexString('#d6dfd8');
-    this.scene.fogStart = 40;
-    this.scene.fogEnd = 105;
+    this.scene.fogStart = 60;
+    this.scene.fogEnd = 145;
     this.camera = new FreeCamera('camera', new Vector3(18, 25, 36), this.scene);
     this.camera.minZ = 0.15;
-    this.camera.maxZ = 180;
+    this.camera.maxZ = 220;
     this.camera.fov = 0.85;
     this.camera.setTarget(Vector3.Zero());
     const ambient = new HemisphericLight('sky', new Vector3(0, 1, 0), this.scene);
@@ -148,29 +150,51 @@ export class BattleRenderer {
     for (const p of this.particles) p.mesh.dispose();
     this.particles = [];
     const random = seededRandom(state.seed + 42);
-    const floor = MeshBuilder.CreateGround('valley', { width: ARENA.x * 2 + 6, height: ARENA.z * 2 + 8, subdivisions: 48, updatable: true }, this.scene);
-    const positions = floor.getVerticesData(VertexBuffer.PositionKind)!;
-    for (let i = 0; i < positions.length; i += 3) positions[i + 1] = groundHeight(positions[i], positions[i + 2]);
-    floor.updateVerticesData(VertexBuffer.PositionKind, positions);
-    floor.material = this.material('#b7bc9c');
+    const floor = new Mesh('valley', this.scene);
+    const positions: number[] = [];
+    const indices: number[] = [];
+    const colors: number[] = [];
+    const halfX = ARENA.x + 4;
+    const halfZ = ARENA.z + 4;
+    const width = halfX * 2 / TERRAIN_STEP + 1;
+    const rows = halfZ * 2 / TERRAIN_STEP + 1;
+    for (let row = 0; row < rows; row++) for (let col = 0; col < width; col++) {
+      const x = -halfX + col * TERRAIN_STEP;
+      const z = -halfZ + row * TERRAIN_STEP;
+      positions.push(x, terrainVertex(x, z), z);
+    }
+    for (let row = 0; row < rows - 1; row++) for (let col = 0; col < width - 1; col++) {
+      const a = row * width + col;
+      indices.push(a, a + 1, a + width, a + 1, a + width + 1, a + width);
+    }
+    const normals: number[] = [];
+    VertexData.ComputeNormals(positions, indices, normals);
+    const data = new VertexData();
+    data.positions = positions;
+    data.indices = indices;
+    data.normals = normals;
+    data.applyToMesh(floor);
+    floor.convertToFlatShadedMesh();
+    const flat = floor.getVerticesData('position')!;
+    // 道路直接着色在同一坡面上，既保留几何切面的光影，也不会出现浮空道路。
+    for (let i = 0; i < flat.length; i += 9) {
+      const x = (flat[i] + flat[i + 3] + flat[i + 6]) / 3;
+      const z = (flat[i + 2] + flat[i + 5] + flat[i + 8]) / 3;
+      const y = groundHeight(x, z);
+      const slope = groundSlope(x, z);
+      const cellX = Math.floor(x / TERRAIN_STEP) * TERRAIN_STEP + TERRAIN_STEP / 2;
+      const cellZ = Math.floor(z / TERRAIN_STEP) * TERRAIN_STEP + TERRAIN_STEP / 2;
+      const path = Math.abs(cellX) < 4 || (Math.abs(Math.abs(cellX) - SIDE_LANE) < 2 && Math.abs(cellZ) < ARENA.z - 8) || (CROSSINGS.some(c => Math.abs(cellZ - c) < 2) && Math.abs(cellX) < ARENA.x - 5);
+      const grass = Color3.Lerp(Color3.FromHexString('#b7bc9c'), Color3.FromHexString('#97ac8e'), clamp(y / 7, 0, 1));
+      const color = path ? Color3.FromHexString('#d8c8a6') : Color3.Lerp(grass, Color3.FromHexString('#bcae93'), clamp(Math.hypot(slope.x, slope.z) * 1.6, 0, 1));
+      for (let vertex = 0; vertex < 3; vertex++) colors.push(color.r, color.g, color.b, 1);
+    }
+    floor.setVerticesData('color', colors);
+    floor.material = this.material('#ffffff');
     floor.parent = this.terrain;
     floor.receiveShadows = true;
-    const base = this.box('island-foundation', ARENA.x * 2 + 6, 3, ARENA.z * 2 + 8, '#baa990', this.terrain);
-    base.position.y = -1.8;
-    // 地面路径跟随高度，避免在坡面上出现悬浮或深度闪烁。
-    const road = (x: number, z: number, width: number, height: number, layer = 0) => {
-      const path = MeshBuilder.CreateGround('sand-path', { width, height, subdivisions: 35, updatable: true }, this.scene);
-      const pv = path.getVerticesData(VertexBuffer.PositionKind)!;
-      for (let i = 0; i < pv.length; i += 3) pv[i + 1] = groundHeight(pv[i] + x, pv[i + 2] + z) + 0.025 + layer * 0.008;
-      path.updateVerticesData(VertexBuffer.PositionKind, pv);
-      path.position.set(x, 0, z);
-      path.material = this.material('#d4c8a9');
-      path.parent = this.terrain;
-      path.receiveShadows = true;
-    };
-    road(0, 0, 6, ARENA.z * 2 - 6);
-    for (const x of [-22, 22]) road(x, 0, 3.2, ARENA.z * 2 - 18);
-    for (const z of [-18, 0, 18]) road(0, z, ARENA.x * 2 - 12, 3.2, 1);
+    const base = this.box('island-foundation', halfX * 2, 3, halfZ * 2, '#baa990', this.terrain);
+    base.position.y = -1.55;
     for (let i = 0; i < 48; i++) {
       const side = i % 2 ? -1 : 1;
       const x = side * (ARENA.x + 3 + random() * 7);
@@ -189,10 +213,10 @@ export class BattleRenderer {
       const m = this.cylinder('far-ridge', 0, 12, 8 + random() * 8, '#a7b9b0', this.terrain, 5);
       m.position.set(-ARENA.x - 12 + i * (ARENA.x * 2 + 24) / 13, 3, -ARENA.z - 8 - random() * 10);
     }
-    for (let i = 0; i < 100; i++) {
+    for (let i = 0; i < 140; i++) {
       const x = (random() - 0.5) * (ARENA.x * 2 - 4);
       const z = (random() - 0.5) * (ARENA.z * 2 - 4);
-      if (Math.abs(x) < 3.5 || Math.abs(Math.abs(x) - 22) < 2 || [-18, 0, 18].some(crossing => Math.abs(z - crossing) < 2) || distance({ x, z }, BASE) < 7 || distance({ x, z }, ENEMY_BASE) < 7) continue;
+      if (Math.abs(x) < 3.5 || Math.abs(Math.abs(x) - SIDE_LANE) < 2 || CROSSINGS.some(crossing => Math.abs(z - crossing) < 2) || distance({ x, z }, BASE) < 7 || distance({ x, z }, ENEMY_BASE) < 7) continue;
       const grass = this.cylinder('grass', 0.08, 0.5, 0.25 + random() * 0.2, i % 3 ? '#9da989' : '#d9ca9e', this.terrain, 4);
       grass.position.set(x, groundHeight(x, z) + 0.1, z);
       grass.rotation.y = random() * 6;
@@ -265,22 +289,24 @@ export class BattleRenderer {
 
   private buildTank(t: Tank): TankVisual {
     const root = new TransformNode(t.id, this.scene);
+    const chassis = new TransformNode('suspension', this.scene);
+    chassis.parent = root;
     const color = t.team === 'player' ? COLORS[t.color % 4] : t.kind === 'heavy' ? '#ad6e5d' : t.kind === 'scout' ? '#bf8964' : '#bd7967';
-    const body = this.box('hull', 1.65, 0.52, 2.15, color, root);
+    const body = this.box('hull', 1.65, 0.52, 2.15, color, chassis);
     body.position.y = 0.56;
-    const deck = this.box('deck', 1.4, 0.2, 1.8, color, root);
+    const deck = this.box('deck', 1.4, 0.2, 1.8, color, chassis);
     deck.position.y = 0.86;
     for (const side of [-1, 1]) {
-      const tread = this.box('track', 0.42, 0.52, 2.35, '#50594e', root);
+      const tread = this.box('track', 0.42, 0.52, 2.35, '#50594e', chassis);
       tread.position.set(side * 0.91, 0.36, 0);
       for (let i = -1; i <= 1; i++) {
-        const wheel = this.cylinder('wheel', 0.4, 0.4, 0.45, '#76806b', root, 8);
+        const wheel = this.cylinder('wheel', 0.4, 0.4, 0.45, '#76806b', chassis, 8);
         wheel.rotation.z = Math.PI / 2;
         wheel.position.set(side * 0.92, 0.35, i * 0.7);
       }
-      const strip = this.box('track-guard', 0.5, 0.12, 2.25, color, root);
+      const strip = this.box('track-guard', 0.5, 0.12, 2.25, color, chassis);
       strip.position.set(side * 0.91, 0.71, 0);
-      const light = this.box('headlight', 0.18, 0.14, 0.08, '#f2dda9', root);
+      const light = this.box('headlight', 0.18, 0.14, 0.08, '#f2dda9', chassis);
       light.material = this.material('#f3d9a5', true);
       light.position.set(side * 0.61, 0.65, 1.1);
     }
@@ -291,13 +317,16 @@ export class BattleRenderer {
     top.position.y = 0.2;
     const hatch = this.cylinder('hatch', 0.5, 0.5, 0.09, '#d3cfaf', turret);
     hatch.position.set(-0.08, 0.51, -0.12);
-    const barrel = this.cylinder('barrel', 0.18, 0.26, 1.65, color, turret);
+    const gun = new TransformNode('gun-elevation', this.scene);
+    gun.parent = turret;
+    gun.position.y = 0.22;
+    const barrel = this.cylinder('barrel', 0.18, 0.26, 1.65, color, gun);
     barrel.rotation.x = Math.PI / 2;
-    barrel.position.set(0, 0.22, 1.13);
-    const muzzle = this.cylinder('muzzle', 0.28, 0.28, 0.25, '#465a4e', turret);
+    barrel.position.set(0, 0, 1.13);
+    const muzzle = this.cylinder('muzzle', 0.28, 0.28, 0.25, '#465a4e', gun);
     muzzle.rotation.x = Math.PI / 2;
-    muzzle.position.set(0, 0.22, 1.94);
-    const stripe = this.box('stripe', 0.13, 0.018, 0.6, '#f2e5c8', root);
+    muzzle.position.set(0, 0, 1.94);
+    const stripe = this.box('stripe', 0.13, 0.018, 0.6, '#f2e5c8', chassis);
     stripe.position.set(0.45, 0.973, -0.55);
     const antenna = this.cylinder('antenna', 0.025, 0.035, 0.75, '#4b594c', turret);
     antenna.position.set(0.4, 0.85, -0.4);
@@ -307,7 +336,7 @@ export class BattleRenderer {
     shield.position.y = 0.11;
     for (const mesh of root.getChildMeshes()) this.shadows.addShadowCaster(mesh);
     if (t.kind === 'heavy') root.scaling.setAll(1.12);
-    return { root, turret, barrel, body, shield };
+    return { root, chassis, gun, turret, barrel, body, shield };
   }
 
   private particle(x: number, y: number, z: number, color: string, smoke = false, force = 1) {
@@ -333,21 +362,21 @@ export class BattleRenderer {
     if (event.kind === 'destroy') {
       this.shake = Math.min(0.7, this.shake + event.size * 0.2 * falloff);
       for (let i = 0; i < (this.lowQuality ? 10 : 22); i++) this.particle(event.x, groundHeight(event.x, event.z) + 1, event.z, i % 3 ? '#a59b84' : '#f5bc75', false, event.size);
-      for (let i = 0; i < 5; i++) this.particle(event.x, 1, event.z, '#9b9e90', true);
+      for (let i = 0; i < 5; i++) this.particle(event.x, groundHeight(event.x, event.z) + 1, event.z, '#9b9e90', true);
     } else if (event.kind === 'shot') {
       const tank = this.tankVisuals.get(event.owner ?? '');
       if (tank) {
         tank.barrel.position.z = 0.92;
         const muzzle = tank.turret.getAbsolutePosition();
         const angle = tank.root.rotation.y + tank.turret.rotation.y;
-        for (let i = 0; i < 4; i++) this.particle(muzzle.x + Math.sin(angle) * 2, muzzle.y + 0.2, muzzle.z + Math.cos(angle) * 2, '#f5bc75');
+        for (let i = 0; i < 4; i++) this.particle(muzzle.x + Math.sin(angle) * 2, muzzle.y + 0.2 - Math.sin(tank.gun.rotation.x) * 2, muzzle.z + Math.cos(angle) * 2, '#f5bc75');
       }
       if (event.owner === local?.id) this.shake = Math.min(0.25, this.shake + 0.1);
     } else if (event.kind === 'hit') {
       this.shake = Math.min(0.4, this.shake + 0.08 * falloff);
-      for (let i = 0; i < 4; i++) this.particle(event.x, groundHeight(event.x, event.z) + 0.7, event.z, '#edc788');
+      for (let i = 0; i < 4; i++) this.particle(event.x, event.y ?? groundHeight(event.x, event.z) + 0.7, event.z, '#edc788');
     } else if (event.kind === 'pickup') {
-      for (let i = 0; i < 8; i++) this.particle(event.x, 1, event.z, '#b5ddbc');
+      for (let i = 0; i < 8; i++) this.particle(event.x, groundHeight(event.x, event.z) + 1, event.z, '#b5ddbc');
     }
   }
 
@@ -375,6 +404,11 @@ export class BattleRenderer {
       visual.root.position.z += (t.z - visual.root.position.z) * lerp;
       visual.root.position.y = groundHeight(visual.root.position.x, visual.root.position.z);
       visual.root.rotation.y += angleDiff(t.angle, visual.root.rotation.y) * lerp;
+      const slope = groundSlope(visual.root.position.x, visual.root.position.z);
+      const heading = visual.root.rotation.y;
+      visual.chassis.rotation.x = -Math.atan(slope.x * Math.sin(heading) + slope.z * Math.cos(heading));
+      visual.chassis.rotation.z = Math.atan(slope.x * Math.cos(heading) - slope.z * Math.sin(heading));
+      visual.gun.rotation.x += (-Math.atan(shotSlope(state, t)) - visual.gun.rotation.x) * lerp;
       visual.turret.rotation.y += angleDiff(t.turret - visual.root.rotation.y, visual.turret.rotation.y) * lerp;
       visual.barrel.position.z += (1.13 - visual.barrel.position.z) * Math.min(1, dt * 12);
       visual.shield.setEnabled(t.shield > 0 || t.buffs.armor > 0);
@@ -390,7 +424,8 @@ export class BattleRenderer {
         mesh.material = this.material('#ffdc92', true);
         this.shells.set(s.id, mesh);
       }
-      mesh.position.set(s.x, groundHeight(s.x, s.z) + 1.08, s.z);
+      mesh.position.set(s.x, s.y, s.z);
+      mesh.rotation.x = -Math.atan2(s.vy, Math.hypot(s.vx, s.vz));
       mesh.rotation.y = Math.atan2(s.vx, s.vz);
     }
     for (const [id, mesh] of this.shells) if (!state.shells.some(s => s.id === id)) { mesh.dispose(); this.shells.delete(id); }
@@ -425,8 +460,8 @@ export class BattleRenderer {
       for (const t of state.tanks) if (t.hp > 0 && t.hp / t.maxHp < 0.6) {
         this.particle(t.x, groundHeight(t.x, t.z) + 1, t.z, t.hp / t.maxHp < 0.3 ? '#66726a' : '#a5aa99', true);
       }
-      if (state.baseHp / state.baseMaxHp < 0.5) this.particle(BASE.x, 2.2, BASE.z, '#899184', true);
-      if (state.mode === 'classic' && state.enemyBaseHp > 0 && state.enemyBaseHp / state.enemyBaseMaxHp < 0.5) this.particle(ENEMY_BASE.x, 2.2, ENEMY_BASE.z, '#899184', true);
+      if (state.baseHp / state.baseMaxHp < 0.5) this.particle(BASE.x, groundHeight(BASE.x, BASE.z) + 2.2, BASE.z, '#899184', true);
+      if (state.mode === 'classic' && state.enemyBaseHp > 0 && state.enemyBaseHp / state.enemyBaseMaxHp < 0.5) this.particle(ENEMY_BASE.x, groundHeight(ENEMY_BASE.x, ENEMY_BASE.z) + 2.2, ENEMY_BASE.z, '#899184', true);
     }
     for (const p of this.particles) {
       p.life -= dt;
@@ -458,6 +493,11 @@ export class BattleRenderer {
       // 镜头沿坦克到相机的线段收缩，山壁和围墙不会穿过相机。
       const cx = focus.x - Math.sin(this.yaw) * Math.cos(this.pitch) * r;
       const cz = focus.z - Math.cos(this.yaw) * Math.cos(this.pitch) * r;
+      const terrainAt = terrainIntersection(
+        { x: focus.x, y: focus.y + 1.2, z: focus.z },
+        { x: cx, y: focus.y + 1.2 + Math.sin(this.pitch) * r, z: cz }, 0.7,
+      );
+      if (terrainAt !== null) actualR = Math.max(4.5, r * terrainAt - 0.6);
       for (const o of state.obstacles) {
         if (o.hp <= 0 || o.kind === 'tree') continue;
         const at = segmentCircle(focus.x, focus.z, cx, cz, o.x, o.z, o.radius + 0.4);
@@ -467,6 +507,7 @@ export class BattleRenderer {
       }
       const desired = new Vector3(focus.x - Math.sin(this.yaw) * Math.cos(this.pitch) * actualR, focus.y + 1.2 + Math.sin(this.pitch) * actualR, focus.z - Math.cos(this.yaw) * Math.cos(this.pitch) * actualR);
       Vector3.LerpToRef(this.camera.position, desired, Math.min(1, dt * 12), this.camera.position);
+      this.camera.position.y = Math.max(this.camera.position.y, groundHeight(this.camera.position.x, this.camera.position.z) + 1);
       this.camera.setTarget(target);
       this.camera.fov = portrait ? 1.04 : 0.85;
       if (this.shakeEnabled) {
@@ -488,23 +529,10 @@ export class BattleRenderer {
   }
 
   reticle(state: State, tank: Tank) {
-    let length = 24;
-    const bx = tank.x + Math.sin(tank.turret) * length;
-    const bz = tank.z + Math.cos(tank.turret) * length;
-    for (const o of state.obstacles) if (o.hp > 0) {
-      const at = segmentCircle(tank.x, tank.z, bx, bz, o.x, o.z, o.radius);
-      if (at !== null) length = Math.min(length, at * 24);
-    }
-    for (const t of state.tanks) if (t.team === 'enemy' && t.hp > 0) {
-      const at = segmentCircle(tank.x, tank.z, bx, bz, t.x, t.z, 0.95);
-      if (at !== null) length = Math.min(length, at * 24);
-    }
-    if (state.mode === 'classic' && state.enemyBaseHp > 0) {
-      const at = segmentCircle(tank.x, tank.z, bx, bz, ENEMY_BASE.x, ENEMY_BASE.z, ENEMY_BASE.radius);
-      if (at !== null) length = Math.min(length, at * 24);
-    }
-    const x = tank.x + Math.sin(tank.turret) * length;
-    const z = tank.z + Math.cos(tank.turret) * length;
-    return this.project(x, groundHeight(x, z) + 1.08, z);
+    const length = 40;
+    const start = { x: tank.x, y: groundHeight(tank.x, tank.z) + SHOT_HEIGHT, z: tank.z };
+    const end = { x: start.x + Math.sin(tank.turret) * length, y: start.y + shotSlope(state, tank) * length, z: start.z + Math.cos(tank.turret) * length };
+    const at = traceShot(state, tank.team, start, end)?.at ?? 1;
+    return this.project(start.x + (end.x - start.x) * at, start.y + (end.y - start.y) * at, start.z + (end.z - start.z) * at);
   }
 }

@@ -1,5 +1,6 @@
 import { describe, expect, it } from 'vitest';
 import { Simulation } from '../src/game/simulation';
+import { groundHeight } from '../src/game/terrain';
 import { BASE, cleanInput, damageHandling, type Power, type Shell } from '../src/game/types';
 import { blocked, createMap, findPath, segmentCircle } from '../src/game/world';
 
@@ -16,7 +17,7 @@ function battle() {
 }
 
 function impact(x: number, z: number, damage = 20): Shell {
-  return { id: 99999, owner: 'enemy-test', team: 'enemy', x, z, vx: 0, vz: 27, damage, life: 1 };
+  return { id: 99999, owner: 'enemy-test', team: 'enemy', x, y: groundHeight(x, z) + 1.13, z, vx: 0, vy: 0, vz: 27, damage, life: 1 };
 }
 
 describe('战斗规则', () => {

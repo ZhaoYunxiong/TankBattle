@@ -56,8 +56,10 @@ export interface Shell {
   owner: string;
   team: Tank['team'];
   x: number;
+  y: number;
   z: number;
   vx: number;
+  vy: number;
   vz: number;
   damage: number;
   life: number;
@@ -75,13 +77,14 @@ export interface BattleEvent {
   id: number;
   kind: 'shot' | 'hit' | 'destroy' | 'pickup' | 'wave';
   x: number;
+  y?: number;
   z: number;
   size: number;
   owner?: string;
   power?: Power;
 }
 
-export const PROTOCOL_VERSION = 3;
+export const PROTOCOL_VERSION = 4;
 
 export interface State {
   version: typeof PROTOCOL_VERSION;
@@ -106,13 +109,17 @@ export interface State {
 
 export const EMPTY_INPUT: Input = { moveX: 0, moveZ: 0, aim: Math.PI, fire: false };
 
-export const BASE = { x: 0, z: 37, radius: 2.2 };
+export const BASE = { x: 0, z: 49, radius: 2.2 };
 
-export const ENEMY_BASE = { x: 0, z: -37, radius: 2.2 };
+export const ENEMY_BASE = { x: 0, z: -49, radius: 2.2 };
 
 export const PLAYER_SPAWN_Z = BASE.z - 9;
 
-export const ARENA = { x: 36, z: 48 };
+export const ARENA = { x: 48, z: 60 };
+
+export const SIDE_LANE = 30;
+
+export const CROSSINGS = [-24, 0, 24];
 
 export const WAVES = 5;
 
@@ -135,8 +142,6 @@ export const clamp = (value: number, min: number, max: number) => Math.max(min, 
 export const distance = (a: { x: number; z: number }, b: { x: number; z: number }) => Math.hypot(a.x - b.x, a.z - b.z);
 
 export const angleDiff = (a: number, b: number) => Math.atan2(Math.sin(a - b), Math.cos(a - b));
-
-export const groundHeight = (x: number, z: number) => 0.18 * Math.sin(x * 0.15) * Math.cos(z * 0.13) + 0.08 * Math.sin(z * 0.3);
 
 export function damageHandling(hp: number, maxHp: number) {
   const damage = clamp((0.6 - hp / maxHp) / 0.6, 0, 1);

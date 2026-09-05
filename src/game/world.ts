@@ -1,4 +1,5 @@
-import { ARENA, BASE, ENEMY_BASE, distance, type GameMode, type Obstacle, type Tank } from './types';
+import { ARENA, BASE, ENEMY_BASE, CROSSINGS, SIDE_LANE, distance, type GameMode, type Obstacle, type Tank } from './types';
+import { groundHeight } from './terrain';
 
 export function seededRandom(seed: number) {
   return () => {
@@ -20,24 +21,24 @@ export function createMap(seed: number, mode: GameMode = 'classic'): Obstacle[] 
 
   // 主路、两条侧翼通路和三处横向连接保持畅通，岩壁之间还能炸出捷径。
   for (const side of [-1, 1]) {
-    for (const z of [-30, -26, -10, -6, 8, 12, 28]) {
-      add('rock', side * (10 + random() * 2), z, 1.8 + random() * 0.6, 2.8 + random() * 2);
+    for (const z of [-38, -34, -14, -10, 10, 14, 34]) {
+      add('rock', side * (14 + random() * 2), z, 1.8 + random() * 0.6, 2.8 + random() * 2);
     }
   }
-  for (let i = 0; i < 100; i++) {
+  for (let i = 0; i < 160; i++) {
     const x = (random() - 0.5) * (ARENA.x * 2 - 6);
     const z = (random() - 0.5) * (ARENA.z * 2 - 8);
-    if (Math.abs(x) < 4.8 || Math.abs(Math.abs(x) - 22) < 2.5 || [-18, 0, 18].some(crossing => Math.abs(z - crossing) < 2.5)) continue;
-    if (distance({ x, z }, BASE) < 9 || distance({ x, z }, ENEMY_BASE) < 9 || (Math.abs(z) > 24 && Math.abs(x) < 9)) continue;
+    if (Math.abs(x) < 4.8 || Math.abs(Math.abs(x) - SIDE_LANE) < 2.5 || CROSSINGS.some(crossing => Math.abs(z - crossing) < 2.5)) continue;
+    if (distance({ x, z }, BASE) < 9 || distance({ x, z }, ENEMY_BASE) < 9 || (Math.abs(z) > 34 && Math.abs(x) < 9)) continue;
     if (result.some(o => distance(o, { x, z }) < o.radius + 2.1)) continue;
     add('tree', x, z, 0.65, 2.6 + random() * 2.4);
   }
   const camp = (z: number, facing: number, team: Tank['team']) => {
-    for (const x of [-4.4, -2.2, 2.2, 4.4]) add('wall', x, z + facing * 4.5, 1, 1.5, team);
-    for (const x of [-4.4, -2.2, 0, 2.2, 4.4]) add('wall', x, z - facing * 4.5, 1, 1.5, team);
+    for (const x of [-4.4, -2.2, 2.2, 4.4]) add('wall', x, z + facing * 4.5, 1, 1.95, team);
+    for (const x of [-4.4, -2.2, 0, 2.2, 4.4]) add('wall', x, z - facing * 4.5, 1, 1.95, team);
     for (const offset of [-2.2, 0, 2.2]) {
-      add('wall', -5.5, z + offset, 1, 1.5, team);
-      add('wall', 5.5, z + offset, 1, 1.5, team);
+      add('wall', -5.5, z + offset, 1, 1.95, team);
+      add('wall', 5.5, z + offset, 1, 1.95, team);
     }
   };
   camp(BASE.z, -1, 'player');
@@ -89,7 +90,8 @@ export function findPath(start: { x: number; z: number }, end: { x: number; z: n
       if (blocked(x, z, obstacles, 0.95, mode)) continue;
       const next = cell({ x, z });
       if (closed.has(next)) continue;
-      const cost = (g.get(current) ?? 0) + step;
+      const rise = groundHeight(x, z) - groundHeight(p.x, p.z);
+      const cost = (g.get(current) ?? 0) + Math.hypot(step, rise) + Math.max(0, rise) * 0.24;
       if (cost < (g.get(next) ?? Infinity)) {
         came.set(next, current);
         g.set(next, cost);

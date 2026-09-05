@@ -122,7 +122,8 @@ export class Rooms {
     if (!/^[A-Z2-9]{6}$/.test(this.code)) { this.close(); throw new Error('请输入 6 位房间号。'); }
     try {
       const peer = await this.open(this.playerId);
-      const connection = peer.connect(PREFIX + this.code, { reliable: true, serialization: 'json', metadata: { name, version: PROTOCOL_VERSION } });
+      // JSON 通道会拒绝超过 16,300 字节的消息；大地图改用可自动分片重组的二进制序列化。
+      const connection = peer.connect(PREFIX + this.code, { reliable: true, serialization: 'binary', metadata: { name, version: PROTOCOL_VERSION } });
       this.host = connection;
       await new Promise<void>((resolve, reject) => {
         const timer = window.setTimeout(() => reject(new Error('没有连上房主。请检查房间号；同一 Wi-Fi 通常更容易直连。')), 18000);

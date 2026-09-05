@@ -1,6 +1,7 @@
 import { describe, expect, it } from 'vitest';
 import { Simulation } from '../src/game/simulation';
-import { ARENA, BASE, ENEMY_BASE, PLAYER_SPAWN_Z, distance, pickupHint, type GameMode, type Power, type Shell, type Tank } from '../src/game/types';
+import { groundHeight } from '../src/game/terrain';
+import { ARENA, BASE, ENEMY_BASE, PLAYER_SPAWN_Z, SIDE_LANE, CROSSINGS, distance, pickupHint, type GameMode, type Power, type Shell, type Tank } from '../src/game/types';
 import { blocked, createMap, findPath } from '../src/game/world';
 
 function battle(mode: GameMode = 'classic') {
@@ -13,7 +14,7 @@ function battle(mode: GameMode = 'classic') {
 }
 
 function shell(x: number, z: number, team: Tank['team']): Shell {
-  return { id: 999999, owner: team === 'player' ? 'player' : 'enemy-test', team, x, z, vx: 0, vz: 0, damage: 20, life: 1 };
+  return { id: 999999, owner: team === 'player' ? 'player' : 'enemy-test', team, x, y: groundHeight(x, z) + 1.13, z, vx: 0, vy: 0, vz: 0, damage: 20, life: 1 };
 }
 
 describe('经典攻防与防守模式', () => {
@@ -103,12 +104,12 @@ describe('经典攻防与防守模式', () => {
 });
 
 describe('扩大后的地图和补给反馈', () => {
-  it.each(['classic', 'defense'] as const)('%s 地图面积翻倍，出生区与三条进攻路线均可通行', mode => {
-    expect(ARENA.x * 2 * ARENA.z * 2).toBe(54 * 64 * 2);
+  it.each(['classic', 'defense'] as const)('%s 扩大地图的出生区与三条进攻路线均可通行', mode => {
+    expect(ARENA.x * 2 * ARENA.z * 2).toBe(96 * 120);
     const obstacles = createMap(47, mode);
     for (const x of [-3.75, -1.25, 1.25, 3.75]) expect(blocked(x, PLAYER_SPAWN_Z, obstacles, 0.85, mode)).toBe(false);
-    for (const x of [-22, 0, 22]) for (let z = -24; z <= 24; z += 2) expect(blocked(x, z, obstacles, 0.85, mode)).toBe(false);
-    for (const z of [-18, 0, 18]) for (let x = -28; x <= 28; x += 2) expect(blocked(x, z, obstacles, 0.85, mode)).toBe(false);
+    for (const x of [-SIDE_LANE, 0, SIDE_LANE]) for (let z = -36; z <= 36; z += 2) expect(blocked(x, z, obstacles, 0.85, mode)).toBe(false);
+    for (const z of CROSSINGS) for (let x = -40; x <= 40; x += 2) expect(blocked(x, z, obstacles, 0.85, mode)).toBe(false);
     expect(blocked(ARENA.x, 0, [], 0.85, mode)).toBe(true);
     expect(blocked(0, ARENA.z, [], 0.85, mode)).toBe(true);
   });

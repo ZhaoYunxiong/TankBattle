@@ -1,5 +1,7 @@
-import { angleDiff, ARENA, BASE, ENEMY_BASE, PLAYER_SPAWN_Z, clamp, cleanInput, damageHandling, distance, EMPTY_INPUT, PROTOCOL_VERSION, WAVES, type BattleEvent, type GameMode, type Input, type Power, type Shell, type State, type Tank } from './types';
+import { angleDiff, ARENA, BASE, ENEMY_BASE, PLAYER_SPAWN_Z, SIDE_LANE, clamp, cleanInput, damageHandling, distance, EMPTY_INPUT, PROTOCOL_VERSION, WAVES, type BattleEvent, type GameMode, type Input, type Power, type Shell, type State, type Tank } from './types';
 import { blocked, createMap, findPath, seededRandom, segmentCircle } from './world';
+import { groundHeight, slopeSpeed, terrainIntersection } from './terrain';
+import { SHOT_HEIGHT, shotSlope, traceShot } from './combat';
 
 export class Simulation {
   state: State;
@@ -76,8 +78,8 @@ export class Simulation {
     };
   }
 
-  private event(kind: BattleEvent['kind'], x: number, z: number, size = 1, owner?: string, power?: Power) {
-    this.state.events.push({ id: this.nextId++, kind, x, z, size, owner, ...(power ? { power } : {}) });
+  private event(kind: BattleEvent['kind'], x: number, z: number, size = 1, owner?: string, power?: Power, y?: number) {
+    this.state.events.push({ id: this.nextId++, kind, x, z, size, owner, ...(y === undefined ? {} : { y }), ...(power ? { power } : {}) });
     if (this.state.events.length > 80) this.state.events.shift();
   }
 
@@ -98,7 +100,7 @@ export class Simulation {
   private spawnEnemy() {
     const s = this.state;
     const classic = s.mode === 'classic';
-    const lanes = classic ? [-6, 0, 6] : [-25, 0, 25];
+    const lanes = classic ? [-6, 0, 6] : [-SIDE_LANE, 0, SIDE_LANE];
     const first = Math.floor(this.random() * lanes.length);
     const candidates = [0, 2.5].flatMap(offset => lanes.map((_, i) => ({
       x: lanes[(first + i) % lanes.length],
@@ -171,7 +173,8 @@ export class Simulation {
       } else input = this.enemyInput(t, dt);
       t.turret += clamp(angleDiff(input.aim, t.turret), -dt * 3.4, dt * 3.4);
       const speed = (t.team === 'player' ? 6 : t.kind === 'scout' ? 4.4 : t.kind === 'heavy' ? 2.5 : 3.3) * damageHandling(t.hp, t.maxHp).speed;
-      this.move(t, input.moveX * speed * dt, input.moveZ * speed * dt);
+      const slope = slopeSpeed(t.x, t.z, input.moveX, input.moveZ);
+      this.move(t, input.moveX * speed * slope * dt, input.moveZ * speed * slope * dt);
       if (input.fire && t.cooldown <= 0 && s.phase === 'battle') {
         const burst = t.buffs.burst > 0;
         this.fire(t, burst ? 12 : t.team === 'player' ? 20 : 14);
@@ -250,12 +253,17 @@ export class Simulation {
     const turn = angleDiff(Math.atan2(waypoint.x - t.x, waypoint.z - t.z), t.angle);
     const firingAt = obstruction && distance(obstruction, t) < 17 ? obstruction : target;
     const firingAim = Math.atan2(firingAt.x - t.x, firingAt.z - t.z);
-    const throttle = distance(t, target) > (returning ? 1.5 : 9) || (!returning && obstruction) ? Math.abs(turn) < 1.2 ? 1 : 0.15 : 0;
+    const hiddenByGround = !returning && distance(t, firingAt) < 23 && terrainIntersection(
+      { x: t.x, y: groundHeight(t.x, t.z) + SHOT_HEIGHT, z: t.z },
+      { x: firingAt.x, y: groundHeight(firingAt.x, firingAt.z) + 1, z: firingAt.z },
+    ) !== null;
+    // 坡后目标不可见时继续接近，不在山脚停车反复射击地面。
+    const throttle = distance(t, target) > (returning ? 1.5 : hiddenByGround ? 2.8 : 9) || (!returning && obstruction) ? Math.abs(turn) < 1.2 ? 1 : 0.15 : 0;
     // 敌军保留沿寻路路线转向的驾驶方式，玩家方向控制不改变其行为。
     t.angle += clamp(turn * 2, -1, 1) * dt * (t.kind === 'heavy' ? 1.3 : 1.9);
     return {
       moveX: Math.sin(t.angle) * throttle, moveZ: Math.cos(t.angle) * throttle, aim: firingAim,
-      fire: !returning && distance(t, firingAt) < 23 && Math.abs(angleDiff(t.turret, obstruction ? firingAim : aim)) < 0.12,
+      fire: !returning && !hiddenByGround && distance(t, firingAt) < 23 && Math.abs(angleDiff(t.turret, obstruction ? firingAim : aim)) < 0.12,
     };
   }
 
@@ -263,10 +271,11 @@ export class Simulation {
     const spread = damageHandling(t.hp, t.maxHp).spread + (t.team === 'enemy' ? 0.035 : 0);
     const angle = t.turret + (this.random() - 0.5) * spread * 2;
     const speed = 27;
+    const slope = shotSlope(this.state, t, angle);
     // 从炮塔中心开始做连续碰撞检测，避免炮口穿过近距离墙体后凭空射到墙后。
     this.state.shells.push({
-      id: this.nextId++, owner: t.id, team: t.team, x: t.x, z: t.z,
-      vx: Math.sin(angle) * speed, vz: Math.cos(angle) * speed, damage, life: 2,
+      id: this.nextId++, owner: t.id, team: t.team, x: t.x, y: groundHeight(t.x, t.z) + SHOT_HEIGHT, z: t.z,
+      vx: Math.sin(angle) * speed, vy: slope * speed, vz: Math.cos(angle) * speed, damage, life: 2,
     });
     this.event('shot', t.x, t.z, 0.6, t.id);
   }
@@ -274,34 +283,24 @@ export class Simulation {
   private advanceShells(dt: number) {
     for (const shell of this.state.shells) {
       shell.life -= dt;
-      const nx = shell.x + shell.vx * dt;
-      const nz = shell.z + shell.vz * dt;
-      let nearest = Infinity;
-      let hit: { type: 'obstacle' | 'tank' | 'base'; id: string | number } | null = null;
-      const check = (x: number, z: number, radius: number, candidate: typeof hit) => {
-        const at = segmentCircle(shell.x, shell.z, nx, nz, x, z, radius);
-        if (at !== null && at < nearest) { nearest = at; hit = candidate; }
-      };
-      for (const o of this.state.obstacles) if (o.hp > 0) check(o.x, o.z, o.radius, { type: 'obstacle', id: o.id });
-      for (const t of this.state.tanks) {
-        if (t.hp > 0 && t.connected && t.team !== shell.team) check(t.x, t.z, 0.95, { type: 'tank', id: t.id });
-      }
-      if (shell.team === 'enemy' && this.state.baseHp > 0) check(BASE.x, BASE.z, BASE.radius, { type: 'base', id: 'player' });
-      if (shell.team === 'player' && this.state.mode === 'classic' && this.state.enemyBaseHp > 0) check(ENEMY_BASE.x, ENEMY_BASE.z, ENEMY_BASE.radius, { type: 'base', id: 'enemy' });
-      const collision = hit as { type: 'obstacle' | 'tank' | 'base'; id: string | number } | null;
+      const next = { x: shell.x + shell.vx * dt, y: shell.y + shell.vy * dt, z: shell.z + shell.vz * dt };
+      const collision = traceShot(this.state, shell.team, shell, next);
+      const at = collision?.at ?? 1;
+      shell.x += (next.x - shell.x) * at;
+      shell.y += (next.y - shell.y) * at;
+      shell.z += (next.z - shell.z) * at;
       if (collision) {
-        shell.x += (nx - shell.x) * nearest;
-        shell.z += (nz - shell.z) * nearest;
         shell.life = 0;
-        this.hit(shell, collision);
-      } else { shell.x = nx; shell.z = nz; }
+        if (collision.target) this.hit(shell, collision.target);
+        else this.event('hit', shell.x, shell.z, 0.7, shell.owner, undefined, shell.y);
+      }
       if (Math.abs(shell.x) > ARENA.x + 3 || Math.abs(shell.z) > ARENA.z + 3) shell.life = 0;
     }
     this.state.shells = this.state.shells.filter(s => s.life > 0);
   }
 
   private hit(shell: Shell, target: { type: 'obstacle' | 'tank' | 'base'; id: string | number }) {
-    this.event('hit', shell.x, shell.z, 0.7, shell.owner);
+    this.event('hit', shell.x, shell.z, 0.7, shell.owner, undefined, shell.y);
     if (target.type === 'base') {
       const enemy = target.id === 'enemy';
       const key = enemy ? 'enemyBaseHp' : 'baseHp';
