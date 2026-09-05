@@ -158,3 +158,17 @@ svg { display: block; width: 22px; height: 22px; flex-shrink: 0; }
 @media (pointer: coarse) {
   .player-name input, .difficulty-picker select, .setting select { font-size: 16px; }
 }
+
+.map-picker { display: grid; grid-template-columns: auto 1fr; gap: 5px 12px; align-items: center; margin-bottom: 12px; min-width: 0; }
+.map-picker label { color: var(--muted); font-size: 11px; letter-spacing: 1px; }
+.map-picker select { min-width: 0; min-height: 36px; padding: 5px 8px; border: 1px solid #71826742; border-radius: 7px; color: var(--ink); background: #f4f1e8bb; }
+.map-picker small { grid-column: 1 / -1; color: var(--muted); font-size: 10px; }
+#concealmentStatus { color: #e3e7b3; white-space: nowrap; font-size: 10px; text-shadow: 0 1px 3px #253a30; }
+@media (pointer: coarse) { .map-picker select { font-size: 16px; } }
+@media (max-height: 580px) and (orientation: landscape) {
+  .hero > .map-picker { grid-column: 1; grid-row: 5; margin: 0; gap: 3px 6px; }
+  .hero > .menu-meta { display: none; }
+  .map-picker small { display: none; }
+  .hero > .difficulty-picker small { display: none; }
+  .hero { overflow-y: auto; pointer-events: auto; align-content: start; }
+}

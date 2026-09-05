@@ -1,4 +1,6 @@
-import { BASE, ENEMY_BASE, clamp, distance, type State, type Tank } from './types';
+import { mapFor } from './maps';
+import { concealed } from './visibility';
+import { clamp, distance, type State, type Tank } from './types';
 import { groundHeight, groundSlope, terrainIntersection, type Point3 } from './terrain';
 import { segmentCircle } from './world';
 
@@ -11,19 +13,19 @@ export type ShotTarget = { type: 'obstacle' | 'tank' | 'base'; id: string | numb
 export function shotSlope(state: State, tank: Tank, angle = tank.turret) {
   const sx = Math.sin(angle);
   const sz = Math.cos(angle);
-  const slope = groundSlope(tank.x, tank.z);
+  const slope = groundSlope(tank.x, tank.z, mapFor(state.mapSize));
   let result = slope.x * sx + slope.z * sz;
   let nearest = SHOT_RANGE;
   const consider = (x: number, z: number, radius: number, height: number) => {
     const d = distance(tank, { x, z });
     if (d < 0.5 || d >= nearest || segmentCircle(tank.x, tank.z, tank.x + sx * SHOT_RANGE, tank.z + sz * SHOT_RANGE, x, z, radius) === null) return;
     nearest = d;
-    result = (groundHeight(x, z) + height - groundHeight(tank.x, tank.z) - SHOT_HEIGHT) / d;
+    result = (groundHeight(x, z, mapFor(state.mapSize)) + height - groundHeight(tank.x, tank.z, mapFor(state.mapSize)) - SHOT_HEIGHT) / d;
   };
   // 只辅助炮管仰角，水平方向仍由玩家瞄准；被山坡遮挡的目标仍会被地形拦住。
-  for (const t of state.tanks) if (t.hp > 0 && t.connected && t.team !== tank.team) consider(t.x, t.z, 0.95, 1);
+  for (const t of state.tanks) if (t.hp > 0 && t.connected && t.team !== tank.team && !concealed(t, state) && (tank.team === 'enemy' || state.visibleEnemies.includes(t.id))) consider(t.x, t.z, 0.95, 1);
   for (const o of state.obstacles) if (o.hp > 0) consider(o.x, o.z, o.radius, Math.min(1.1, o.height * 0.6));
-  const base = tank.team === 'enemy' ? BASE : state.mode === 'classic' ? ENEMY_BASE : null;
+  const base = tank.team === 'enemy' ? mapFor(state.mapSize).base : state.mode === 'classic' && state.enemyBaseDiscovered ? mapFor(state.mapSize).enemyBase : null;
   if (base) consider(base.x, base.z, base.radius, 1.1);
   return clamp(result, -0.65, 0.65);
 }
@@ -57,17 +59,17 @@ function segmentCylinder(a: Point3, b: Point3, x: number, z: number, radius: num
 }
 
 export function traceShot(state: State, team: Tank['team'], a: Point3, b: Point3): { at: number; target: ShotTarget | null } | null {
-  const ground = terrainIntersection(a, b);
+  const ground = terrainIntersection(a, b, 0.08, mapFor(state.mapSize));
   let at = ground ?? Infinity;
   let target: ShotTarget | null = null;
   const check = (x: number, z: number, radius: number, height: number, candidate: ShotTarget) => {
-    const y = groundHeight(x, z);
+    const y = groundHeight(x, z, mapFor(state.mapSize));
     const t = segmentCylinder(a, b, x, z, radius, y - 0.3, y + height);
     if (t !== null && t < at) { at = t; target = candidate; }
   };
   for (const o of state.obstacles) if (o.hp > 0) check(o.x, o.z, o.radius, o.height, { type: 'obstacle', id: o.id });
   for (const t of state.tanks) if (t.hp > 0 && t.connected && t.team !== team) check(t.x, t.z, 0.95, 1.65, { type: 'tank', id: t.id });
-  if (team === 'enemy' && state.baseHp > 0) check(BASE.x, BASE.z, BASE.radius, 2.9, { type: 'base', id: 'player' });
-  if (team === 'player' && state.mode === 'classic' && state.enemyBaseHp > 0) check(ENEMY_BASE.x, ENEMY_BASE.z, ENEMY_BASE.radius, 2.9, { type: 'base', id: 'enemy' });
+  if (team === 'enemy' && state.baseHp > 0) check(mapFor(state.mapSize).base.x, mapFor(state.mapSize).base.z, mapFor(state.mapSize).base.radius, 2.9, { type: 'base', id: 'player' });
+  if (team === 'player' && state.mode === 'classic' && state.enemyBaseHp > 0) check(mapFor(state.mapSize).enemyBase.x, mapFor(state.mapSize).enemyBase.z, mapFor(state.mapSize).enemyBase.radius, 2.9, { type: 'base', id: 'enemy' });
   return at === Infinity ? null : { at, target };
 }

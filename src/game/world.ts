@@ -1,5 +1,6 @@
-import { ARENA, BASE, ENEMY_BASE, CROSSINGS, SIDE_LANE, distance, type GameMode, type Obstacle, type Tank } from './types';
+import { distance, type GameMode, type Obstacle, type Tank } from './types';
 import { groundHeight } from './terrain';
+import { mapFor, inRegion, roadDistance, waterAt, waterBlocked, type MapDefinition, type Point } from './maps';
 
 export function seededRandom(seed: number) {
   return () => {
@@ -11,97 +12,126 @@ export function seededRandom(seed: number) {
   };
 }
 
-export function createMap(seed: number, mode: GameMode = 'classic'): Obstacle[] {
+export function createMap(seed: number, mode: GameMode = 'classic', map = mapFor()): Obstacle[] {
   const random = seededRandom(seed);
   const result: Obstacle[] = [];
-  const add = (kind: Obstacle['kind'], x: number, z: number, radius: number, height: number, team?: Tank['team']) => {
-    const hp = kind === 'tree' ? 35 : kind === 'rock' ? 80 : 100;
-    result.push({ id: result.length + 1, kind, x, z, radius, height, hp, maxHp: hp, rotation: random() * Math.PI * 2, ...(team ? { team } : {}) });
+  const add = (kind: Obstacle['kind'], x: number, z: number, radius: number, height: number, variant?: Obstacle['variant'], team?: Tank['team'], rotation = random() * Math.PI * 2) => {
+    const hp = kind === 'tree' ? 35 : kind === 'rock' ? variant === 'layered' ? 100 : 80 : 100;
+    result.push({ id: result.length + 1, kind, x, z, radius, height, hp, maxHp: hp, rotation, ...(variant ? { variant } : {}), ...(team ? { team } : {}) });
   };
-
-  // 主路、两条侧翼通路和三处横向连接保持畅通，岩壁之间还能炸出捷径。
-  for (const side of [-1, 1]) {
-    for (const z of [-38, -34, -14, -10, 10, 14, 34]) {
-      add('rock', side * (14 + random() * 2), z, 1.8 + random() * 0.6, 2.8 + random() * 2);
-    }
+  for (let i = 0; i < map.vegetation; i++) {
+    const x = (random() - 0.5) * (map.arena.x * 2 - 6);
+    const z = (random() - 0.5) * (map.arena.z * 2 - 8);
+    const rock = i % 5 === 0;
+    const variant: Obstacle['variant'] = rock ? (['low', 'boulder', 'layered'] as const)[i % 3] : (['pine', 'round', 'birch', 'dead'] as const)[i % 4];
+    const radius = rock ? variant === 'low' ? 1.1 : 1.8 : 0.75;
+    if (roadDistance({ x, z }, map) < radius + 2.7 || waterAt({ x, z }, map) || map.bridges.some(b => inRegion({ x, z }, b, 3))) continue;
+    if ([map.base, map.enemyBase, map.spawn, map.enemySpawn].some(p => distance(p, { x, z }) < 10)) continue;
+    if (map.grass.some(g => inRegion({ x, z }, g, 1.4))) continue;
+    if (result.some(o => distance(o, { x, z }) < o.radius + radius + 1.4)) continue;
+    const height = rock ? variant === 'low' ? 0.85 : variant === 'layered' ? 4.5 : 3 : 3 + random() * 2;
+    add(rock ? 'rock' : 'tree', x, z, radius, height, variant);
   }
-  for (let i = 0; i < 160; i++) {
-    const x = (random() - 0.5) * (ARENA.x * 2 - 6);
-    const z = (random() - 0.5) * (ARENA.z * 2 - 8);
-    if (Math.abs(x) < 4.8 || Math.abs(Math.abs(x) - SIDE_LANE) < 2.5 || CROSSINGS.some(crossing => Math.abs(z - crossing) < 2.5)) continue;
-    if (distance({ x, z }, BASE) < 9 || distance({ x, z }, ENEMY_BASE) < 9 || (Math.abs(z) > 34 && Math.abs(x) < 9)) continue;
-    if (result.some(o => distance(o, { x, z }) < o.radius + 2.1)) continue;
-    add('tree', x, z, 0.65, 2.6 + random() * 2.4);
-  }
-  const camp = (z: number, facing: number, team: Tank['team']) => {
-    for (const x of [-4.4, -2.2, 2.2, 4.4]) add('wall', x, z + facing * 4.5, 1, 1.95, team);
-    for (const x of [-4.4, -2.2, 0, 2.2, 4.4]) add('wall', x, z - facing * 4.5, 1, 1.95, team);
-    for (const offset of [-2.2, 0, 2.2]) {
-      add('wall', -5.5, z + offset, 1, 1.95, team);
-      add('wall', 5.5, z + offset, 1, 1.95, team);
-    }
+  const camp = (p: Point, facing: number, team: Tank['team']) => {
+    for (const x of [-4.4, -2.2, 2.2, 4.4]) add('wall', p.x + x, p.z + facing * 4.5, 1, 1.95, undefined, team, 0);
+    for (const x of [-4.4, -2.2, 0, 2.2, 4.4]) add('wall', p.x + x, p.z - facing * 4.5, 1, 1.95, undefined, team, 0);
+    for (const offset of [-2.2, 0, 2.2]) for (const side of [-1, 1]) add('wall', p.x + side * 5.5, p.z + offset, 1, 1.95, undefined, team, Math.PI / 2);
   };
-  camp(BASE.z, -1, 'player');
-  if (mode === 'classic') camp(ENEMY_BASE.z, 1, 'enemy');
+  camp(map.base, -1, 'player');
+  if (mode === 'classic') camp(map.enemyBase, 1, 'enemy');
   return result;
 }
 
-export function blocked(x: number, z: number, obstacles: Obstacle[], radius = 0.85, mode: GameMode = 'classic') {
-  if (Math.abs(x) > ARENA.x - radius || Math.abs(z) > ARENA.z - radius) return true;
-  if (distance({ x, z }, BASE) < BASE.radius + radius) return true;
-  if (mode === 'classic' && distance({ x, z }, ENEMY_BASE) < ENEMY_BASE.radius + radius) return true;
+export function blocked(x: number, z: number, obstacles: Obstacle[], radius = 0.85, mode: GameMode = 'classic', map = mapFor()) {
+  if (Math.abs(x) > map.arena.x - radius || Math.abs(z) > map.arena.z - radius || waterBlocked({ x, z }, map, radius)) return true;
+  if (distance({ x, z }, map.base) < map.base.radius + radius) return true;
+  if (mode === 'classic' && distance({ x, z }, map.enemyBase) < map.enemyBase.radius + radius) return true;
   return obstacles.some(o => o.hp > 0 && Math.hypot(x - o.x, z - o.z) < o.radius + radius);
 }
 
-// A* 使用当前障碍状态；障碍被摧毁后，下一次规划自然会使用新开辟的道路。
-export function findPath(start: { x: number; z: number }, end: { x: number; z: number }, obstacles: Obstacle[], mode: GameMode = 'classic') {
-  const step = 2;
-  const minX = -ARENA.x + step;
-  const minZ = -ARENA.z + step;
-  const width = ARENA.x - 1;
-  const height = ARENA.z - 1;
-  const point = (id: number) => ({ x: (id % width) * step + minX, z: Math.floor(id / width) * step + minZ });
-  const cell = (p: { x: number; z: number }) => Math.max(0, Math.min(width - 1, Math.round((p.x - minX) / step))) + Math.max(0, Math.min(height - 1, Math.round((p.z - minZ) / step))) * width;
-  // 营地核心不可驶入；到达外侧射击位置即视为寻路完成，避免穷举整张大地图。
-  const campTarget = distance(end, BASE) < 0.1 || (mode === 'classic' && distance(end, ENEMY_BASE) < 0.1);
-  const arrive = campTarget ? 5.2 : 2.8;
-  const first = cell(start);
-  const open = new Set([first]);
-  const came = new Map<number, number>();
-  const g = new Map([[first, 0]]);
-  const h = (id: number) => distance(point(id), end);
-  const closed = new Set<number>();
-  let best = first;
-  for (let iteration = 0; iteration < width * height && open.size; iteration++) {
-    let current = -1;
-    let lowest = Infinity;
-    for (const id of open) {
-      const f = (g.get(id) ?? Infinity) + h(id);
-      if (f < lowest) { current = id; lowest = f; }
+// 占用网格只在障碍摧毁后重建，避免大地图的每一步 A* 扫描全部树木。
+const navigation = new WeakMap<Obstacle[], { signature: string; cells: Uint8Array }>();
+
+function navGrid(obstacles: Obstacle[], mode: GameMode, map: MapDefinition) {
+  const signature = map.id + mode + obstacles.filter(o => o.hp > 0).map(o => o.id).join(',');
+  const previous = navigation.get(obstacles);
+  if (previous?.signature === signature) return previous.cells;
+  const width = map.arena.x - 1, height = map.arena.z - 1;
+  const cells = new Uint8Array(width * height);
+  for (let id = 0; id < cells.length; id++) {
+    const x = (id % width) * 2 - map.arena.x + 2, z = Math.floor(id / width) * 2 - map.arena.z + 2;
+    cells[id] = blocked(x, z, obstacles, 0.95, mode, map) ? 1 : 0;
+  }
+  navigation.set(obstacles, { signature, cells });
+  return cells;
+}
+
+class Frontier {
+  private entries: { id: number; cost: number }[] = [];
+
+  get length() { return this.entries.length; }
+
+  push(id: number, cost: number) {
+    const entry = { id, cost };
+    let at = this.entries.length;
+    this.entries.push(entry);
+    while (at > 0) {
+      const parent = (at - 1) >> 1;
+      if (this.entries[parent].cost <= cost) break;
+      this.entries[at] = this.entries[parent]; at = parent;
     }
+    this.entries[at] = entry;
+  }
+
+  pop() {
+    const first = this.entries[0], last = this.entries.pop()!;
+    if (this.entries.length) {
+      let at = 0;
+      while (at * 2 + 1 < this.entries.length) {
+        let child = at * 2 + 1;
+        if (child + 1 < this.entries.length && this.entries[child + 1].cost < this.entries[child].cost) child++;
+        if (last.cost <= this.entries[child].cost) break;
+        this.entries[at] = this.entries[child]; at = child;
+      }
+      this.entries[at] = last;
+    }
+    return first.id;
+  }
+}
+
+export function findPath(start: Point, end: Point, obstacles: Obstacle[], mode: GameMode = 'classic', map = mapFor(), exact = false) {
+  const width = map.arena.x - 1, height = map.arena.z - 1;
+  const point = (id: number) => ({ x: (id % width) * 2 - map.arena.x + 2, z: Math.floor(id / width) * 2 - map.arena.z + 2 });
+  const cell = (p: Point) => Math.max(0, Math.min(width - 1, Math.round((p.x + map.arena.x - 2) / 2))) + Math.max(0, Math.min(height - 1, Math.round((p.z + map.arena.z - 2) / 2))) * width;
+  const campTarget = distance(end, map.base) < 0.1 || (mode === 'classic' && distance(end, map.enemyBase) < 0.1);
+  const arrive = exact ? 1.5 : campTarget ? 5.2 : 2.8;
+  const first = cell(start), grid = navGrid(obstacles, mode, map);
+  const open = new Frontier();
+  const came = new Int32Array(grid.length).fill(-1);
+  const g = new Float64Array(grid.length).fill(Infinity);
+  const h = (id: number) => distance(point(id), end);
+  const closed = new Uint8Array(grid.length);
+  g[first] = 0; open.push(first, h(first));
+  let best = first;
+  while (open.length) {
+    const current = open.pop();
+    if (closed[current]) continue;
     if (h(current) < h(best)) best = current;
     if (h(current) < arrive) { best = current; break; }
-    open.delete(current);
-    closed.add(current);
+    closed[current] = 1;
     const p = point(current);
-    for (const [dx, dz] of [[1, 0], [-1, 0], [0, 1], [0, -1]]) {
-      const x = p.x + dx * step;
-      const z = p.z + dz * step;
-      if (blocked(x, z, obstacles, 0.95, mode)) continue;
-      const next = cell({ x, z });
-      if (closed.has(next)) continue;
-      const rise = groundHeight(x, z) - groundHeight(p.x, p.z);
-      const cost = (g.get(current) ?? 0) + Math.hypot(step, rise) + Math.max(0, rise) * 0.24;
-      if (cost < (g.get(next) ?? Infinity)) {
-        came.set(next, current);
-        g.set(next, cost);
-        open.add(next);
-      }
+    for (const next of [current - 1, current + 1, current - width, current + width]) {
+      if (next < 0 || next >= width * height || closed[next] || grid[next]) continue;
+      const q = point(next);
+      if (distance(p, q) > 2.1) continue;
+      const rise = groundHeight(q.x, q.z, map) - groundHeight(p.x, p.z, map);
+      const cost = g[current] + (Math.hypot(2, rise) + Math.max(0, rise) * 0.24) / (waterAt(q, map) === 'shallow' ? 0.6 : 1);
+      if (cost < g[next]) { came[next] = current; g[next] = cost; open.push(next, cost + h(next)); }
     }
   }
-  const path: { x: number; z: number }[] = [];
-  while (best !== first && came.has(best)) { path.unshift(point(best)); best = came.get(best)!; }
-  return path;
+  const path: Point[] = [];
+  while (best !== first && came[best] >= 0) { path.push(point(best)); best = came[best]; }
+  return path.reverse();
 }
 
 export function segmentCircle(ax: number, az: number, bx: number, bz: number, cx: number, cz: number, radius: number): number | null {

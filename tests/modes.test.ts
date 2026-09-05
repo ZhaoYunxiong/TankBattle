@@ -1,3 +1,4 @@
+import { mapFor } from '../src/game/maps';
 import { describe, expect, it } from 'vitest';
 import { Simulation } from '../src/game/simulation';
 import { groundHeight } from '../src/game/terrain';
@@ -104,12 +105,12 @@ describe('经典攻防与防守模式', () => {
 });
 
 describe('扩大后的地图和补给反馈', () => {
-  it.each(['classic', 'defense'] as const)('%s 扩大地图的出生区与三条进攻路线均可通行', mode => {
+  it.each(['classic', 'defense'] as const)('%s 出生区、桥梁可通行，深河不能直接穿越', mode => {
     expect(ARENA.x * 2 * ARENA.z * 2).toBe(96 * 120);
     const obstacles = createMap(47, mode);
     for (const x of [-3.75, -1.25, 1.25, 3.75]) expect(blocked(x, PLAYER_SPAWN_Z, obstacles, 0.85, mode)).toBe(false);
-    for (const x of [-SIDE_LANE, 0, SIDE_LANE]) for (let z = -36; z <= 36; z += 2) expect(blocked(x, z, obstacles, 0.85, mode)).toBe(false);
-    for (const z of CROSSINGS) for (let x = -40; x <= 40; x += 2) expect(blocked(x, z, obstacles, 0.85, mode)).toBe(false);
+    for (const bridge of mapFor().bridges) for (let z = bridge.z - 7; z <= bridge.z + 7; z += 0.5) expect(blocked(bridge.x, z, obstacles, 0.85, mode)).toBe(false);
+    expect(blocked(20, -4, obstacles, 0.85, mode)).toBe(true);
     expect(blocked(ARENA.x, 0, [], 0.85, mode)).toBe(true);
     expect(blocked(0, ARENA.z, [], 0.85, mode)).toBe(true);
   });

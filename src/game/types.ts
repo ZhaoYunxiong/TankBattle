@@ -1,3 +1,5 @@
+import { mapFor, type MapSize } from './maps';
+
 export type Phase = 'lobby' | 'intermission' | 'battle' | 'won' | 'lost';
 
 export type Power = 'rapid' | 'burst' | 'heal' | 'armor';
@@ -32,6 +34,7 @@ export interface Tank {
   maxHp: number;
   cooldown: number;
   warning: number;
+  exposedUntil: number;
   lives: number;
   respawn: number;
   shield: number;
@@ -44,6 +47,7 @@ export interface Tank {
 export interface Obstacle {
   id: number;
   kind: 'tree' | 'rock' | 'wall';
+  variant?: 'pine' | 'round' | 'birch' | 'dead' | 'low' | 'boulder' | 'layered';
   x: number;
   z: number;
   radius: number;
@@ -85,15 +89,21 @@ export interface BattleEvent {
   size: number;
   owner?: string;
   power?: Power;
+  obstacle?: number;
+  material?: Obstacle['kind'];
 }
 
-export const PROTOCOL_VERSION = 5;
+export const PROTOCOL_VERSION = 6;
 
 export interface State {
   version: typeof PROTOCOL_VERSION;
   seed: number;
   mode: GameMode;
   difficulty: Difficulty;
+  mapSize: MapSize;
+  enemyBaseDiscovered: boolean;
+  visibleEnemies: string[];
+  explored: number[];
   time: number;
   phase: Phase;
   paused: boolean;
@@ -114,9 +124,9 @@ export interface State {
 
 export const EMPTY_INPUT: Input = { moveX: 0, moveZ: 0, aim: Math.PI, fire: false };
 
-export const BASE = { x: 0, z: 49, radius: 2.2 };
+export const BASE = mapFor().base;
 
-export const ENEMY_BASE = { x: 0, z: -49, radius: 2.2 };
+export const ENEMY_BASE = mapFor().enemyBase;
 
 export const PLAYER_SPAWN_Z = BASE.z - 9;
 

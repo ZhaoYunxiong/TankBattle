@@ -25,7 +25,7 @@ try {
   assert.match(await page.locator('#enemyCount').textContent(), /敌军/);
   assert.equal(await page.evaluate(() => document.documentElement.scrollWidth <= innerWidth), true);
   assert.equal(await page.locator('#modeName').textContent(), '经典模式');
-  assert.equal(await page.locator('#enemyBaseCard').isVisible(), true);
+  assert.equal(await page.locator('#enemyBaseCard').isVisible(), false);
   assert.equal(await page.locator('.player-card').count(), 0);
   assert.equal(await page.locator('#localTankStatus').isVisible(), true);
   assert.equal(await page.locator('#score').isVisible(), false);
@@ -50,6 +50,7 @@ try {
   await page.locator('#pauseButton').tap();
   await page.locator('#backMenu').tap();
   await page.locator('#difficulty').selectOption('casual');
+  await page.locator('#mapSize').selectOption('large');
   await page.locator('#hostButton').tap();
   await page.locator('#lobbyDialog').waitFor({ state: 'visible', timeout: 25000 });
   const code = await page.locator('#roomCode').textContent();
@@ -59,7 +60,7 @@ try {
   await guest.goto(url + '?room=' + code);
   await guest.locator('#connectButton').tap();
   await guest.locator('#lobbyDialog').waitFor({ state: 'visible', timeout: 40000 });
-  assert.match(await guest.locator('#lobbyMode').textContent(), /防守模式 · 休闲/);
+  assert.match(await guest.locator('#lobbyMode').textContent(), /防守模式 · 休闲 · 双桥远山/);
   await guest.locator('#readyButton').tap();
   await page.locator('#startRoom').tap();
   await guest.locator('#hud').waitFor({ state: 'visible' });
@@ -70,7 +71,7 @@ try {
   assert.equal(await guest.locator('#difficultyBadge').textContent(), '休闲');
   await guest.screenshot({ path: 'artifacts/published-multiplayer.png' });
   assert.deepEqual(errors, []);
-  console.log(JSON.stringify({ url, http: response.status(), singlePlayer: 'passed', modes: ['classic', 'defense'], pageZoomGuard: 'passed', difficultySync: 'passed', pickupFeedback: 'passed', mobileLayout: 'passed', publicWebRTC: 'passed', pageErrors: errors }));
+  console.log(JSON.stringify({ url, http: response.status(), singlePlayer: 'passed', modes: ['classic', 'defense'], pageZoomGuard: 'passed', difficultySync: 'passed', largeMapSync: 'passed', scoutingHud: 'passed', pickupFeedback: 'passed', mobileLayout: 'passed', publicWebRTC: 'passed', pageErrors: errors }));
 } finally {
   await browser.close();
 }
