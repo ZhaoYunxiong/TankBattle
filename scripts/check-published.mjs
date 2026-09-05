@@ -1,5 +1,6 @@
 import { chromium } from '@playwright/test';
 import assert from 'node:assert/strict';
+import { pinchCameraControls } from './touch-checks.mjs';
 
 const url = process.argv[2] || 'https://zhaoyunxiong.github.io/TankBattle/';
 const browser = await chromium.launch({
@@ -28,6 +29,12 @@ try {
   assert.equal(await page.locator('.player-card').count(), 0);
   assert.equal(await page.locator('#localTankStatus').isVisible(), true);
   assert.equal(await page.locator('#score').isVisible(), false);
+  const cdp = await context.newCDPSession(page);
+  assert.equal(await pinchCameraControls(page, cdp), 1);
+  await page.touchscreen.tap(195, 380);
+  await page.touchscreen.tap(195, 380);
+  await page.waitForTimeout(300);
+  assert.equal(await page.evaluate(() => visualViewport.scale), 1);
   assert.match(await page.locator('#pickupLabels [data-power=heal]').textContent(), /满血无需维修/);
   await page.screenshot({ path: 'artifacts/published-battle.png' });
   await page.locator('#pauseButton').tap();
@@ -63,7 +70,7 @@ try {
   assert.equal(await guest.locator('#difficultyBadge').textContent(), '休闲');
   await guest.screenshot({ path: 'artifacts/published-multiplayer.png' });
   assert.deepEqual(errors, []);
-  console.log(JSON.stringify({ url, http: response.status(), singlePlayer: 'passed', modes: ['classic', 'defense'], difficultySync: 'passed', pickupFeedback: 'passed', mobileLayout: 'passed', publicWebRTC: 'passed', pageErrors: errors }));
+  console.log(JSON.stringify({ url, http: response.status(), singlePlayer: 'passed', modes: ['classic', 'defense'], pageZoomGuard: 'passed', difficultySync: 'passed', pickupFeedback: 'passed', mobileLayout: 'passed', publicWebRTC: 'passed', pageErrors: errors }));
 } finally {
   await browser.close();
 }

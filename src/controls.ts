@@ -48,17 +48,19 @@ export class Controls {
     document.addEventListener('visibilitychange', () => { if (document.hidden) this.reset(); });
     canvas.addEventListener('contextmenu', e => e.preventDefault());
     const aimDown = (e: PointerEvent) => {
-      if (!this.enabled) return;
+      // 瞄准手指在松开前保持独占，额外手指不能抢走镜头并造成视角突跳。
+      if (!this.enabled || this.lookPointer !== -1) return;
       this.renderer.audio.unlock();
+      this.lookPointer = e.pointerId;
+      this.previous = { x: e.clientX, y: e.clientY };
+      // 先捕获再申请鼠标锁定，避免锁定请求过程中再次捕获触发 InvalidStateError。
+      if (!document.pointerLockElement) (e.currentTarget as HTMLElement).setPointerCapture(e.pointerId);
       if (e.pointerType === 'mouse' && e.button === 0) {
         this.firing = true;
         if (!document.pointerLockElement) {
           try { void canvas.requestPointerLock()?.catch(() => {}); } catch { /* 浏览器不允许锁定时仍可拖动瞄准。 */ }
         }
       }
-      this.lookPointer = e.pointerId;
-      this.previous = { x: e.clientX, y: e.clientY };
-      if (!document.pointerLockElement) (e.currentTarget as HTMLElement).setPointerCapture(e.pointerId);
     };
     const aimMove = (e: PointerEvent) => {
       if (!this.enabled || (e.pointerId !== this.lookPointer && document.pointerLockElement !== canvas)) return;
@@ -75,10 +77,15 @@ export class Controls {
     canvas.addEventListener('pointermove', aimMove);
     canvas.addEventListener('pointerup', aimUp);
     canvas.addEventListener('pointercancel', aimUp);
-    window.addEventListener('mouseup', () => { this.firing = false; });
+    canvas.addEventListener('lostpointercapture', e => {
+      // 鼠标进入指针锁定也会释放捕获，此时仍然需要保持按住开火。
+      if (document.pointerLockElement !== canvas) aimUp(e);
+    });
+    window.addEventListener('mouseup', () => { this.firing = false; fire.classList.remove('pressed'); });
     canvas.addEventListener('wheel', e => {
       if (!this.enabled) return;
       e.preventDefault();
+      if (e.ctrlKey) return;
       this.renderer.zoom = clamp(this.renderer.zoom + e.deltaY * 0.01, CAMERA.minZoom, CAMERA.maxZoom);
     }, { passive: false });
     stick.addEventListener('pointerdown', e => {
@@ -107,10 +114,20 @@ export class Controls {
     };
     stick.addEventListener('pointerup', stickUp);
     stick.addEventListener('pointercancel', stickUp);
-    fire.addEventListener('pointerdown', e => { aimDown(e); this.firing = true; fire.classList.add('pressed'); });
+    stick.addEventListener('lostpointercapture', stickUp);
+    fire.addEventListener('pointerdown', e => {
+      aimDown(e);
+      if (this.lookPointer === e.pointerId) { this.firing = true; fire.classList.add('pressed'); }
+    });
     fire.addEventListener('pointermove', aimMove);
-    fire.addEventListener('pointerup', e => { aimUp(e); fire.classList.remove('pressed'); });
-    fire.addEventListener('pointercancel', e => { aimUp(e); fire.classList.remove('pressed'); });
+    const fireUp = (e: PointerEvent) => {
+      if (this.lookPointer !== e.pointerId) return;
+      aimUp(e);
+      fire.classList.remove('pressed');
+    };
+    fire.addEventListener('pointerup', fireUp);
+    fire.addEventListener('pointercancel', fireUp);
+    fire.addEventListener('lostpointercapture', e => { if (document.pointerLockElement !== canvas) fireUp(e); });
   }
 
   reset() {
@@ -119,6 +136,7 @@ export class Controls {
     this.joystick = { x: 0, y: 0 };
     this.stickPointer = -1;
     this.lookPointer = -1;
+    document.getElementById('fireButton')?.classList.remove('pressed');
     const knob = document.querySelector<HTMLElement>('#joystick > span');
     if (knob) knob.style.transform = '';
   }

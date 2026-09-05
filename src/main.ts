@@ -6,8 +6,11 @@ import { BattleRenderer } from './game/renderer';
 import { CAMERA } from './game/camera';
 import { groundHeight, groundSlope } from './game/terrain';
 import { Controls } from './controls';
+import { preventBrowserZoom } from './viewport';
 import { Rooms } from './network';
 import { ARENA, BASE, ENEMY_BASE, COLORS, distance, MODES, pickupHint, POWER_LABELS, WAVES, type Difficulty, type GameMode, type Power, type State } from './game/types';
+
+preventBrowserZoom();
 
 const icons: Record<string, string> = {
   tank: '<rect x="3" y="9" width="4" height="11" rx="1"/><rect x="17" y="9" width="4" height="11" rx="1"/><rect x="7" y="11" width="10" height="7" rx="2"/><circle cx="12" cy="10" r="4"/><path d="M12 2v8"/>',

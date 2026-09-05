@@ -33,11 +33,19 @@ test('桌面真实三维渲染、驾驶、炮击和暂停', async ({ page }) => 
   await page.keyboard.up('KeyW');
   const after = await page.evaluate(() => (window as any).__tankBattle.state.tanks[0].z);
   expect(after).toBeLessThan(before - 1);
-  await page.keyboard.down('Space');
-  await page.waitForTimeout(1600);
-  await page.keyboard.up('Space');
+  await page.mouse.move(700, 400);
+  await page.mouse.down();
+  try {
+    // 获取指针锁定时会释放指针捕获，鼠标持续按住仍应发出至少两炮。
+    await expect.poll(() => page.evaluate(() => {
+      const d = (window as any).__tankBattle;
+      return d.state.events.filter((e: any) => e.kind === 'shot' && e.owner === d.localId).length;
+    })).toBeGreaterThanOrEqual(2);
+  } finally { await page.mouse.up(); }
   expect(await page.evaluate(() => (window as any).__tankBattle.state.events.some((e: any) => e.kind === 'shot'))).toBe(true);
   await page.screenshot({ path: 'artifacts/desktop-battle.png' });
+  await page.keyboard.press('Escape');
+  await expect.poll(() => page.evaluate(() => document.pointerLockElement === null)).toBe(true);
   await page.getByRole('button', { name: '暂停', exact: true }).click();
   await expect(page.locator('#pauseDialog')).toBeVisible();
   const time = await page.evaluate(() => (window as any).__tankBattle.state.time);

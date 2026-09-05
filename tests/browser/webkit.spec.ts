@@ -16,6 +16,10 @@ test('WebKit 手机画面、设置和单人战役', async ({ browser, browserNam
   await expect(page.locator('#hud')).toBeVisible();
   await expect.poll(() => page.evaluate(() => (window as any).__tankBattle.state.phase), { timeout: 15000 }).toBe('battle');
   await expect(page.locator('#fireButton')).toBeVisible();
+  await page.touchscreen.tap(195, 380);
+  await page.touchscreen.tap(195, 380);
+  await page.waitForTimeout(300);
+  expect(await page.evaluate(() => visualViewport!.scale)).toBe(1);
   await expect.poll(() => page.evaluate(() => (window as any).__tankBattle.camera.position.y)).toBeGreaterThan(13);
   const before = await page.evaluate(() => (window as any).__tankBattle.state.tanks[0]);
   await page.keyboard.down('ArrowLeft');
