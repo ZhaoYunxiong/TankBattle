@@ -127,6 +127,11 @@ function enterGame() {
   resultShown = false;
   previousBaseHp = state.baseHp;
   previousDropEvent = state.events.at(-1)?.id ?? 0;
+  // 开局立即刷新模式、目标和血条，不等待下一次 HUD 定时更新。
+  get('enemyLabels').innerHTML = '';
+  get('pickupLabels').innerHTML = '';
+  get('crosshair').hidden = true;
+  updateHud();
   renderer.audio.unlock();
   toast(matchMedia('(pointer: coarse)').matches ? '左摇杆移动，右侧拖动瞄准；按住开火可连射。' : 'WASD 移动，鼠标瞄准，左键开火。C 可归位镜头。', 3000);
 }

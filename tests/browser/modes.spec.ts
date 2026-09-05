@@ -23,6 +23,7 @@ test('紧凑手机的模式选择、横竖屏大厅和防守入口', async ({ br
   await page.locator('#modeDefense').tap();
   await expect(page.locator('#modeDefense')).toHaveAttribute('aria-pressed', 'true');
   await page.locator('#soloButton').tap();
+  expect(await page.locator('#modeName').textContent()).toBe('防守模式');
   await expect.poll(() => page.evaluate(() => (window as any).__tankBattle.state.mode)).toBe('defense');
   await expect(page.locator('#modeName')).toHaveText('防守模式');
   await expect(page.locator('#enemyBaseCard')).toBeHidden();
@@ -31,6 +32,7 @@ test('紧凑手机的模式选择、横竖屏大厅和防守入口', async ({ br
   await expect(page.locator('#modeDefense')).toHaveAttribute('aria-pressed', 'true');
   await page.locator('#modeClassic').tap();
   await page.locator('#soloButton').tap();
+  expect(await page.locator('#modeName').textContent()).toBe('经典模式');
   await expect(page.locator('#enemyBaseCard')).toBeVisible();
   await expect(page.locator('#modeName')).toHaveText('经典模式');
   expect(errors).toEqual([]);
