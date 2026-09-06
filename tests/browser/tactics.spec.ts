@@ -79,11 +79,13 @@ test('桌面方向装甲、侧面与弱点反馈跟随真实炮弹，提示自�
 
 test('装甲、弱点与护盾音效实际渲染出不同音色，并在短时间内结束', async ({ page }) => {
   await page.goto('./');
+  test.skip(!await page.evaluate(() => typeof (window.OfflineAudioContext ?? (window as any).webkitOfflineAudioContext) === 'function'), '当前浏览器测试运行时不提供离线音频接口');
   const tones = await page.evaluate(async () => {
     const { BattleAudio } = await import('/TankBattle/src/game/audio.ts');
+    const Offline = window.OfflineAudioContext ?? (window as any).webkitOfflineAudioContext;
     const result = [];
     for (const material of ['armor', 'weakpoint', 'shield']) {
-      const context = new OfflineAudioContext(1, 22050, 44100), audio = new BattleAudio();
+      const context = new Offline(1, 22050, 44100), audio = new BattleAudio();
       // 离线渲染开始前须先排好节点；适配已解锁状态，实际音频节点和采样仍由 Web Audio 生成。
       (audio as any).context = new Proxy(context, { get(target, key) {
         if (key === 'state') return 'running';
