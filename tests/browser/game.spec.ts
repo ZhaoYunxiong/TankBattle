@@ -1,4 +1,5 @@
 import { test, expect } from '@playwright/test';
+import { tapWhileHolding } from '../../scripts/touch-checks.mjs';
 
 test('桌面真实三维渲染、驾驶、炮击和暂停', async ({ page }) => {
   const errors: string[] = [];
@@ -187,8 +188,12 @@ test('手机创建房间，第二位玩家通过真实 WebRTC 同步战场', asy
   });
   const cdp = await guestContext.newCDPSession(guest);
   const stick = (await guest.locator('#joystick').boundingBox())!;
-  await guest.locator('#boostToggle').tap();
-  await cdp.send('Input.dispatchTouchEvent', { type: 'touchStart', touchPoints: [{ x: stick.x + 12, y: stick.y + stick.height / 2, id: 1 }] });
+  const drive = { x: stick.x + 12, y: stick.y + stick.height / 2, id: 1 };
+  await cdp.send('Input.dispatchTouchEvent', { type: 'touchStart', touchPoints: [drive] });
+  await tapWhileHolding(guest, cdp, '#boostToggle', [drive]);
+  await expect(guest.locator('#boostToggle')).toHaveAttribute('aria-pressed', 'true');
+  await tapWhileHolding(guest, cdp, '#chargeToggle', [drive]);
+  await expect(guest.locator('#chargeToggle')).toHaveAttribute('aria-pressed', 'true');
   await expect.poll(() => host.evaluate(() => (window as any).__tankBattle.state.tanks.find((t: any) => t.team === 'player' && t.name !== '房主坦克').x)).toBeGreaterThan(guestBefore.x + 1);
   await cdp.send('Input.dispatchTouchEvent', { type: 'touchEnd', touchPoints: [] });
   await guest.waitForTimeout(600);
@@ -204,7 +209,6 @@ test('手机创建房间，第二位玩家通过真实 WebRTC 同步战场', asy
   expect(hostGuest.z).toBeCloseTo(guestBefore.z);
   expect(Math.abs(hostGuest.x - guestSelf.x)).toBeLessThan(0.4);
   expect(Math.abs(hostGuest.z - guestSelf.z)).toBeLessThan(0.4);
-  await guest.locator('#chargeToggle').tap();
   const fire = (await guest.locator('#fireButton').boundingBox())!;
   await cdp.send('Input.dispatchTouchEvent', { type: 'touchStart', touchPoints: [{ id: 2, x: fire.x + fire.width / 2, y: fire.y + fire.height / 2 }] });
   await expect.poll(() => host.evaluate(id => (window as any).__tankBattle.state.tanks.find((t: any) => t.id === id).charge, guestSelf.id)).toBe(1.6);

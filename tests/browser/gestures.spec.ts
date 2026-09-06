@@ -1,5 +1,5 @@
 import { test, expect } from '@playwright/test';
-import { pinchCameraControls } from '../../scripts/touch-checks.mjs';
+import { pinchCameraControls, tapWhileHolding } from '../../scripts/touch-checks.mjs';
 
 test('手机横竖屏防止页面缩放，多指不抢镜头且菜单仍可滑动', async ({ browser, browserName }) => {
   test.skip(browserName !== 'chromium', '多点触摸通过 Chromium 原生输入验证');
@@ -15,6 +15,28 @@ test('手机横竖屏防止页面缩放，多指不抢镜头且菜单仍可滑�
   for (const viewport of [{ width: 390, height: 844 }, { width: 844, height: 390 }]) {
     await page.setViewportSize(viewport);
     expect(await pinchCameraControls(page, cdp)).toBe(1);
+    const stick = (await page.locator('#joystick').boundingBox())!, boost = (await page.locator('#boostToggle').boundingBox())!;
+    const drive = { id: 1, x: stick.x + stick.width / 2, y: stick.y + stick.height / 2 };
+    const button = { id: 2, x: boost.x + boost.width / 2, y: boost.y + boost.height / 2 };
+    await cdp.send('Input.dispatchTouchEvent', { type: 'touchStart', touchPoints: [drive] });
+    await tapWhileHolding(page, cdp, '#boostToggle', [drive]);
+    await expect(page.locator('#boostToggle')).toHaveAttribute('aria-pressed', 'true');
+    await tapWhileHolding(page, cdp, '#boostToggle', [drive]);
+    await expect(page.locator('#boostToggle')).toHaveAttribute('aria-pressed', 'false');
+    // 移出再移回和系统取消均不算点击；保留捏合防护，不能误切模式。
+    await cdp.send('Input.dispatchTouchEvent', { type: 'touchStart', touchPoints: [drive, button] });
+    await cdp.send('Input.dispatchTouchEvent', { type: 'touchMove', touchPoints: [drive, { ...button, x: button.x - 45 }] });
+    await cdp.send('Input.dispatchTouchEvent', { type: 'touchMove', touchPoints: [drive, button] });
+    await cdp.send('Input.dispatchTouchEvent', { type: 'touchEnd', touchPoints: [button] });
+    await expect(page.locator('#boostToggle')).toHaveAttribute('aria-pressed', 'false');
+    await cdp.send('Input.dispatchTouchEvent', { type: 'touchStart', touchPoints: [drive, button] });
+    await cdp.send('Input.dispatchTouchEvent', { type: 'touchCancel', touchPoints: [] });
+    await expect(page.locator('#boostToggle')).toHaveAttribute('aria-pressed', 'false');
+    // 触摸后仍可用鼠标单击和键盘 Enter 激活，均只切换一次。
+    await page.locator('#boostToggle').click();
+    await expect(page.locator('#boostToggle')).toHaveAttribute('aria-pressed', 'true');
+    await page.locator('#boostToggle').focus(); await page.keyboard.press('Enter');
+    await expect(page.locator('#boostToggle')).toHaveAttribute('aria-pressed', 'false');
     await page.touchscreen.tap(viewport.width / 2, viewport.height * 0.45);
     await page.touchscreen.tap(viewport.width / 2, viewport.height * 0.45);
     await page.waitForTimeout(300);

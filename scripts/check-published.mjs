@@ -1,6 +1,6 @@
 import { chromium } from '@playwright/test';
 import assert from 'node:assert/strict';
-import { pinchCameraControls } from './touch-checks.mjs';
+import { pinchCameraControls, tapWhileHolding } from './touch-checks.mjs';
 
 const url = process.argv[2] || 'https://zhaoyunxiong.github.io/TankBattle/';
 const browser = await chromium.launch({
@@ -44,12 +44,17 @@ try {
   assert.equal(await page.evaluate(() => visualViewport.scale), 1);
   assert.match(await page.locator('#pickupLabels [data-power=heal]').textContent(), /满血无需维修/);
   await page.screenshot({ path: 'artifacts/published-battle.png' });
-  await page.locator('#boostToggle').tap();
+  const stick = await page.locator('#joystick').boundingBox();
+  const driveTouch = { id: 1, x: stick.x + stick.width / 2, y: stick.y + 12 };
+  await cdp.send('Input.dispatchTouchEvent', { type: 'touchStart', touchPoints: [driveTouch] });
+  await tapWhileHolding(page, cdp, '#boostToggle', [driveTouch]);
   assert.equal(await page.locator('#boostToggle').getAttribute('aria-pressed'), 'true');
-  await page.keyboard.down('KeyW');
   await page.waitForFunction(() => Number(document.querySelector('#staminaMeter').getAttribute('aria-valuenow')) < 95);
-  await page.keyboard.up('KeyW'); await page.locator('#boostToggle').tap();
-  await page.locator('#chargeToggle').tap();
+  await tapWhileHolding(page, cdp, '#chargeToggle', [driveTouch]);
+  assert.equal(await page.locator('#chargeToggle').getAttribute('aria-pressed'), 'true');
+  await tapWhileHolding(page, cdp, '#boostToggle', [driveTouch]);
+  assert.equal(await page.locator('#boostToggle').getAttribute('aria-pressed'), 'false');
+  await cdp.send('Input.dispatchTouchEvent', { type: 'touchEnd', touchPoints: [] });
   const fire = await page.locator('#fireButton').boundingBox();
   const chargeTouch = { id: 3, x: fire.x + fire.width / 2, y: fire.y + fire.height / 2 };
   await cdp.send('Input.dispatchTouchEvent', { type: 'touchStart', touchPoints: [chargeTouch] });

@@ -12,6 +12,7 @@ import { BattleRenderer } from './game/renderer';
 import { CAMERA } from './game/camera';
 import { groundHeight, groundSlope } from './game/terrain';
 import { Controls } from './controls';
+import { enableHudTouchButtons } from './touch-buttons';
 import { preventBrowserZoom } from './viewport';
 import { Rooms } from './network';
 import { COLORS, distance, MODES, pickupHint, POWER_LABELS, WAVES, type Difficulty, type GameMode, type Power, type State } from './game/types';
@@ -64,6 +65,7 @@ try {
   throw error;
 }
 const controls = new Controls(renderer, get('battlefield'), get('joystick'), get('fireButton'));
+enableHudTouchButtons(get('hud'));
 const rooms = new Rooms();
 let selectedMode: GameMode = 'classic';
 const savedDifficulty = read('difficulty', 'normal');

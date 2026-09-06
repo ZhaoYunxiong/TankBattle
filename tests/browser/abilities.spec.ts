@@ -1,4 +1,5 @@
 import { test, expect } from '@playwright/test';
+import { tapWhileHolding } from '../../scripts/touch-checks.mjs';
 
 test('桌面加速与蓄力操作、透明 HUD 和暂停取消', async ({ page }) => {
   await page.setViewportSize({ width: 1280, height: 800 });
@@ -58,12 +59,30 @@ test('手机竖屏加速蓄力双指操作与触控取消', async ({ browser }) 
     expect(camp.x + camp.width).toBeLessThan(map.x);
     await page.screenshot({ path: `artifacts/abilities-mobile-${size.width}.png` });
   }
-  await page.locator('#boostToggle').tap(); await page.locator('#chargeToggle').tap();
   const cdp = await context.newCDPSession(page), stick = (await page.locator('#joystick').boundingBox())!, fire = (await page.locator('#fireButton').boundingBox())!;
   const drive = { id: 1, x: stick.x + stick.width / 2, y: stick.y + 12 }, aim = { id: 2, x: fire.x + fire.width / 2, y: fire.y + fire.height / 2 };
+  await cdp.send('Input.dispatchTouchEvent', { type: 'touchStart', touchPoints: [drive] });
+  await tapWhileHolding(page, cdp, '#boostToggle', [drive]);
+  await expect(page.locator('#boostToggle')).toHaveAttribute('aria-pressed', 'true');
+  await tapWhileHolding(page, cdp, '#chargeToggle', [drive]);
+  await expect(page.locator('#chargeToggle')).toHaveAttribute('aria-pressed', 'true');
+  await tapWhileHolding(page, cdp, '#zoomIn', [drive]);
+  await expect.poll(() => page.evaluate(() => (window as any).__tankBattle.camera.zoom)).toBe(16);
+  await tapWhileHolding(page, cdp, '#zoomOut', [drive]);
+  await expect.poll(() => page.evaluate(() => (window as any).__tankBattle.camera.zoom)).toBe(18);
+  await tapWhileHolding(page, cdp, '#freeLook', [drive]);
+  await expect(page.locator('#freeLook')).toHaveClass(/active/);
+  await tapWhileHolding(page, cdp, '#freeLook', [drive]);
+  await expect(page.locator('#freeLook')).not.toHaveClass(/active/);
   await cdp.send('Input.dispatchTouchEvent', { type: 'touchStart', touchPoints: [drive, aim] });
   await expect.poll(() => page.evaluate(() => (window as any).__tankBattle.state.tanks[0].charge)).toBe(1.6);
   expect(await page.evaluate(() => (window as any).__tankBattle.state.tanks[0].stamina)).toBeLessThan(90);
+  // 移动和蓄力手指都不松开，第三根手指仍能关闭/开启加速，蓄力不会被误释放。
+  await tapWhileHolding(page, cdp, '#boostToggle', [drive, aim]);
+  await expect(page.locator('#boostToggle')).toHaveAttribute('aria-pressed', 'false');
+  await tapWhileHolding(page, cdp, '#boostToggle', [drive, aim]);
+  await expect(page.locator('#boostToggle')).toHaveAttribute('aria-pressed', 'true');
+  expect(await page.evaluate(() => (window as any).__tankBattle.state.tanks[0].charging)).toBe(true);
   await page.screenshot({ path: 'artifacts/charged-mobile.png' });
   await cdp.send('Input.dispatchTouchEvent', { type: 'touchEnd', touchPoints: [aim] });
   await expect.poll(() => page.evaluate(() => (window as any).__tankBattle.state.events.filter((e: any) => e.kind === 'shot' && e.charge === 1).length)).toBe(1);

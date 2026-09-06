@@ -1,3 +1,11 @@
+// 保留已按住的手指，仅按下并松开新手指；CDP touchEnd 指定本次松开的触点。
+export async function tapWhileHolding(page, cdp, selector, held, id = 3) {
+  const rect = await page.locator(selector).boundingBox();
+  const finger = { id, x: rect.x + rect.width / 2, y: rect.y + rect.height / 2 };
+  await cdp.send('Input.dispatchTouchEvent', { type: 'touchStart', touchPoints: [...held, finger] });
+  await cdp.send('Input.dispatchTouchEvent', { type: 'touchEnd', touchPoints: [finger] });
+}
+
 // 用真实触摸输入从 HUD 按钮上捏合；旧版会把页面放大到约 3.5 倍。
 export async function pinchCameraControls(page, cdp) {
   const a = await page.locator('#zoomIn').boundingBox();
