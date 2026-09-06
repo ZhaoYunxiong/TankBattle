@@ -74,9 +74,16 @@ test('手机竖屏通过摇杆占领补给点，横竖屏据点提示完整', as
   await page.goto('./'); await page.locator('#difficulty').selectOption('casual'); await page.locator('#soloButton').tap();
   await expect.poll(() => page.evaluate(() => (window as any).__tankBattle.state.phase), simulationWait).toBe('battle');
   const cdp = await context.newCDPSession(page), stick = (await page.locator('#joystick').boundingBox())!;
-  await cdp.send('Input.dispatchTouchEvent', { type: 'touchStart', touchPoints: [{ id: 1, x: stick.x + stick.width / 2, y: stick.y + 12 }] });
-  await expect.poll(() => page.evaluate(() => (window as any).__tankBattle.state.tanks[0].z), simulationWait).toBeLessThan(24.7);
+  // 微推摇杆，以四分之一速度驶向圈内中央，为云端触摸回传留出停车距离。
+  const center = { id: 1, x: stick.x + stick.width / 2, y: stick.y + stick.height / 2 };
+  await cdp.send('Input.dispatchTouchEvent', { type: 'touchStart', touchPoints: [{ ...center, y: center.y - stick.width * 0.08 }] });
+  await expect.poll(() => page.evaluate(() => (window as any).__tankBattle.state.tanks[0].z), simulationWait).toBeLessThan(22);
+  await cdp.send('Input.dispatchTouchEvent', { type: 'touchMove', touchPoints: [center] });
   await cdp.send('Input.dispatchTouchEvent', { type: 'touchEnd', touchPoints: [] });
+  expect(await page.evaluate(() => {
+    const s = (window as any).__tankBattle.state, p = s.tanks[0], site = s.sites.find((s: any) => s.kind === 'supply');
+    return Math.hypot(p.x - site.x, p.z - site.z);
+  })).toBeLessThan(6);
   await expect.poll(() => page.evaluate(() => (window as any).__tankBattle.state.sites.find((s: any) => s.kind === 'supply').team), simulationWait).toBe('player');
   await expect(page.locator('.site-label[data-site="-4"]')).toHaveAttribute('data-team', 'player');
   await page.screenshot({ path: 'artifacts/supply-portrait.png' });
