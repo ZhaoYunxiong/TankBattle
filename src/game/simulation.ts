@@ -1,5 +1,6 @@
 import { inRegion, mapFor, roadDistance, waterAt, type MapSize } from './maps';
 import { COVER_REDUCTION, terrainCover } from './cover';
+import { BOOST, CHARGE, chargeDamage, chargePower } from './abilities';
 import { cleanLoadout, emptyLoadout } from './factory';
 import { uniqueId } from '../id';
 import { concealed, updateVisibility } from './visibility';
@@ -26,6 +27,14 @@ export class Simulation {
   private nextId = 1000;
 
   private inputs = new Map<string, { value: Input; at: number }>();
+
+  private chargeReleases = new Set<string>();
+
+  private chargeHeld = new Set<string>();
+
+  private staminaRest = new Map<string, number>();
+
+  private recoils = new Map<string, { x: number; z: number; time: number }>();
 
   private paths = new Map<string, { points: { x: number; z: number }[]; at: number }>();
 
@@ -88,7 +97,7 @@ export class Simulation {
 
   disconnect(id: string) {
     const t = this.state.tanks.find(t => t.id === id);
-    if (t) { t.connected = false; this.inputs.delete(id); }
+    if (t) { t.connected = false; t.boosting = false; this.cancelCharge(t); this.inputs.delete(id); this.recoils.delete(id); }
     if (this.state.phase === 'lobby') this.state.tanks = this.state.tanks.filter(t => t.id !== id);
     this.updateCampUpgrades();
   }
@@ -111,7 +120,18 @@ export class Simulation {
 
   input(id: string, raw: unknown) {
     const value = cleanInput(raw);
-    if (value) this.inputs.set(id, { value, at: this.state.time });
+    const tank = this.state.tanks.find(t => t.id === id && t.team === 'player' && t.connected);
+    if (!value || !tank) return;
+    const received = this.inputs.get(id), previous = received?.value;
+    // 按下和松开都即时发送；即便两次输入落在同一模拟帧，也保留一次松开发射。
+    if (!value.chargeMode || (value.cancelCharge ?? 0) !== (previous?.cancelCharge ?? 0) || this.state.paused || this.state.phase !== 'battle') this.cancelCharge(tank);
+    else if (previous?.chargeMode && previous.fire && !value.fire && this.state.time - received!.at < 0.4 && this.chargeHeld.has(id)) this.chargeReleases.add(id);
+    if (value.chargeMode && value.fire && !this.state.paused && this.state.phase === 'battle') this.chargeHeld.add(id);
+    this.inputs.set(id, { value, at: this.state.time });
+  }
+
+  private cancelCharge(tank: Tank) {
+    tank.charge = 0; tank.charging = false; this.chargeReleases.delete(tank.id); this.chargeHeld.delete(tank.id);
   }
 
   start() {
@@ -130,7 +150,8 @@ export class Simulation {
     const hp = team === 'player' ? 120 : DIFFICULTIES[this.state.difficulty].hp[kind];
     return {
       id, name, team, kind, color: 0, x: 0, z: 0, angle: 0, turret: 0, hp, maxHp: hp,
-      cooldown: 0, warning: 0, exposedUntil: 0, lives: 2, respawn: 0, shield: 0, buffs: { rapid: 0, burst: 0, heal: 0, armor: 0 },
+      cooldown: 0, stamina: BOOST.capacity, boosting: false, boostLocked: false, charging: false, charge: 0, recoil: 0,
+      warning: 0, exposedUntil: 0, lives: 2, respawn: 0, shield: 0, buffs: { rapid: 0, burst: 0, heal: 0, armor: 0 },
       score: 0, connected: true, ready: true, upgrades: emptyLoadout(), stats: { kills: 0, assists: 0, defenses: 0, baseDamage: 0, teamBonus: 0 },
     };
   }
@@ -193,7 +214,10 @@ export class Simulation {
   }
 
   step(dt: number) {
-    if (this.state.paused || ['lobby', 'won', 'lost'].includes(this.state.phase)) return;
+    if (this.state.paused || ['lobby', 'won', 'lost'].includes(this.state.phase)) {
+      for (const t of this.state.tanks) { this.cancelCharge(t); t.boosting = false; }
+      return;
+    }
     dt = clamp(dt, 0, 0.05);
     const s = this.state;
     s.time += dt;
@@ -223,9 +247,11 @@ export class Simulation {
     for (const t of s.tanks) {
       if (!t.connected) continue;
       t.cooldown = Math.max(0, t.cooldown - dt);
+      t.recoil *= Math.exp(-dt * 8);
       t.shield = Math.max(0, t.shield - dt);
       t.buffs.rapid = Math.max(0, t.buffs.rapid - dt);
       if (t.hp <= 0) {
+        this.cancelCharge(t); t.boosting = false; this.recoils.delete(t.id);
         if (t.team === 'player' && t.respawn > 0) {
           t.respawn -= dt;
           if (t.respawn <= 0) {
@@ -233,6 +259,7 @@ export class Simulation {
             t.x = this.map.spawn.x + (t.color - 1.5) * 2.5;
             t.z = this.map.spawn.z;
             t.shield = 4;
+            t.stamina = BOOST.capacity; t.boostLocked = false; t.recoil = 0; this.staminaRest.delete(t.id);
             t.buffs = { rapid: 0, burst: 0, heal: 0, armor: 0 };
           }
         }
@@ -252,16 +279,42 @@ export class Simulation {
       t.turret += clamp(angleDiff(input.aim, t.turret), -dt * 3.4, dt * 3.4);
       const speed = (t.team === 'player' ? 6 * (1 + t.upgrades.mobility * 0.04) : t.kind === 'scout' ? 4.4 : t.kind === 'heavy' ? 2.5 : 3.3) * damageHandling(t.hp, t.maxHp).speed;
       const slope = slopeSpeed(t.x, t.z, input.moveX, input.moveZ, this.map);
-      this.move(t, input.moveX * speed * slope * (waterAt(t, this.map) === 'shallow' ? 0.6 : 1) * dt, input.moveZ * speed * slope * (waterAt(t, this.map) === 'shallow' ? 0.6 : 1) * dt);
-      if (input.fire && t.cooldown <= 0 && s.phase === 'battle') {
-        const burst = t.buffs.burst > 0;
-        this.fire(t, burst ? 12 : t.team === 'player' ? 20 : 14);
-        const balance = DIFFICULTIES[s.difficulty];
-        t.cooldown = t.team === 'player' ? (t.buffs.rapid > 0 ? 0.7 : 1) * (1 - t.upgrades.reload * 0.04) : t.kind === 'heavy' ? balance.heavyCooldown : balance.cooldown;
-        t.warning = 0;
-        const memory = this.memories.get(t.id);
-        if (memory) memory.shotAt = undefined;
-        if (burst) { t.buffs.burst--; this.bursts.push({ tank: t.id, at: s.time + 0.12, count: 2 }); }
+      if (!input.boost) t.boostLocked = false;
+      const boost = t.team === 'player' && input.boost && !t.boostLocked && t.stamina > 0 && (t.boosting || t.stamina >= BOOST.restart);
+      const x = t.x, z = t.z, kick = this.recoils.get(t.id);
+      if (kick) {
+        const at = Math.min(1, dt / kick.time);
+        this.move(t, kick.x * at, kick.z * at); kick.x *= 1 - at; kick.z *= 1 - at; kick.time -= dt;
+        if (kick.time <= 0.001) this.recoils.delete(t.id);
+      } else this.move(t, input.moveX * speed * slope * (waterAt(t, this.map) === 'shallow' ? 0.6 : 1) * (boost ? BOOST.speed : 1) * dt,
+        input.moveZ * speed * slope * (waterAt(t, this.map) === 'shallow' ? 0.6 : 1) * (boost ? BOOST.speed : 1) * dt);
+      t.boosting = !!boost && !kick && Math.hypot(t.x - x, t.z - z) > 0.001;
+      if (t.boosting) {
+        t.stamina = Math.max(0, t.stamina - BOOST.drain * dt); this.staminaRest.set(t.id, s.time);
+        if (t.stamina <= 0.001) { t.stamina = 0; t.boostLocked = true; t.boosting = false; }
+      } else if (s.time - (this.staminaRest.get(t.id) ?? -BOOST.recoveryDelay) >= BOOST.recoveryDelay) t.stamina = Math.min(BOOST.capacity, t.stamina + BOOST.recovery * dt);
+      const received = this.inputs.get(t.id), fresh = !!received && s.time - received.at < 0.4;
+      if (t.team === 'player' && input.chargeMode && fresh && s.phase === 'battle') {
+        if (this.chargeReleases.delete(t.id)) {
+          if (t.cooldown <= 0) {
+            const power = chargePower(t.charge);
+            this.fire(t, chargeDamage(t.charge), power);
+            t.cooldown = CHARGE.cooldown * (t.buffs.rapid > 0 ? 0.7 : 1) * (1 - t.upgrades.reload * 0.04);
+          }
+          this.cancelCharge(t);
+        } else if (input.fire && t.cooldown <= 0) { t.charging = true; t.charge = Math.min(CHARGE.seconds, t.charge + dt); }
+      } else {
+        this.cancelCharge(t);
+        if (input.fire && t.cooldown <= 0 && s.phase === 'battle') {
+          const burst = t.buffs.burst > 0;
+          this.fire(t, burst ? 12 : t.team === 'player' ? 20 : 14);
+          const balance = DIFFICULTIES[s.difficulty];
+          t.cooldown = t.team === 'player' ? (t.buffs.rapid > 0 ? 0.7 : 1) * (1 - t.upgrades.reload * 0.04) : t.kind === 'heavy' ? balance.heavyCooldown : balance.cooldown;
+          t.warning = 0;
+          const memory = this.memories.get(t.id);
+          if (memory) memory.shotAt = undefined;
+          if (burst) { t.buffs.burst--; this.bursts.push({ tank: t.id, at: s.time + 0.12, count: 2 }); }
+        }
       }
     }
     for (const b of this.bursts) {
@@ -437,18 +490,24 @@ export class Simulation {
     this.state.drops.push({ id: this.nextId++, kind: 'heal', x: recipient.x, z: recipient.z, life: 60 });
   }
 
-  private fire(t: Tank, damage: number) {
+  private fire(t: Tank, damage: number, power?: number) {
     t.exposedUntil = this.state.time + 5;
     const spread = damageHandling(t.hp, t.maxHp).spread + (t.team === 'enemy' ? 0.035 : 0);
     const angle = t.turret + (this.random() - 0.5) * spread * 2;
-    const speed = 27;
+    const speed = power === undefined ? 27 : 32 + power * 8;
     const slope = shotSlope(this.state, t, angle);
     // 从炮塔中心开始做连续碰撞检测，避免炮口穿过近距离墙体后凭空射到墙后。
     this.state.shells.push({
       id: this.nextId++, owner: t.id, team: t.team, x: t.x, y: groundHeight(t.x, t.z, this.map) + SHOT_HEIGHT, z: t.z,
-      vx: Math.sin(angle) * speed, vy: slope * speed, vz: Math.cos(angle) * speed, damage, life: 2,
+      vx: Math.sin(angle) * speed, vy: slope * speed, vz: Math.cos(angle) * speed, damage, life: 2, ...(power === undefined ? {} : { power }),
     });
     this.event('shot', t.x, t.z, 0.6, t.id);
+    if (power !== undefined) {
+      Object.assign(this.state.events.at(-1)!, { charge: power });
+      const recoil = CHARGE.recoil * (0.25 + power * 0.75);
+      this.recoils.set(t.id, { x: -Math.sin(angle) * recoil, z: -Math.cos(angle) * recoil, time: 0.2 });
+      t.recoil = 0.25 + power * 0.75;
+    }
   }
 
   private advanceShells(dt: number) {
@@ -465,7 +524,8 @@ export class Simulation {
         if (collision.target) this.hit(shell, collision.target);
         else {
           this.event('hit', shell.x, shell.z, 0.7, shell.owner, undefined, shell.y);
-          this.scar(shell.x, shell.z, 0.45, 'impact');
+          if (shell.power !== undefined) Object.assign(this.state.events.at(-1)!, { charge: shell.power });
+          this.scar(shell.x, shell.z, 0.45 + (shell.power ?? 0) * 0.35, 'impact');
         }
       }
       if (Math.abs(shell.x) > this.map.arena.x + 3 || Math.abs(shell.z) > this.map.arena.z + 3) shell.life = 0;
@@ -475,6 +535,7 @@ export class Simulation {
 
   private hit(shell: Shell, target: { type: 'obstacle' | 'tank' | 'base'; id: string | number }) {
     this.event('hit', shell.x, shell.z, 0.7, shell.owner, undefined, shell.y);
+    if (shell.power !== undefined) Object.assign(this.state.events.at(-1)!, { charge: shell.power });
     const shooter = this.state.tanks.find(t => t.id === shell.owner);
     if (shooter) Object.assign(this.state.events.at(-1)!, { sourceX: shooter.x, sourceZ: shooter.z });
     if (target.type === 'base') {

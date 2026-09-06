@@ -46,7 +46,7 @@ test('桌面真实三维渲染、驾驶、炮击和暂停', async ({ page }) => 
   await page.screenshot({ path: 'artifacts/desktop-battle.png' });
   await page.keyboard.press('Escape');
   await expect.poll(() => page.evaluate(() => document.pointerLockElement === null)).toBe(true);
-  await page.getByRole('button', { name: '暂停', exact: true }).click();
+  if (!(await page.locator('#pauseDialog').isVisible())) await page.getByRole('button', { name: '暂停', exact: true }).click();
   await expect(page.locator('#pauseDialog')).toBeVisible();
   const time = await page.evaluate(() => (window as any).__tankBattle.state.time);
   await page.waitForTimeout(350);
@@ -124,7 +124,7 @@ test('手机竖屏、横屏和双拇指输入', async ({ browser }) => {
 });
 
 test('手机创建房间，第二位玩家通过真实 WebRTC 同步战场', async ({ browser }) => {
-  test.setTimeout(100000);
+  test.setTimeout(150000);
   const hostContext = await browser.newContext({ viewport: { width: 844, height: 390 }, isMobile: true, hasTouch: true, deviceScaleFactor: 1 });
   const guestContext = await browser.newContext({ viewport: { width: 390, height: 844 }, isMobile: true, hasTouch: true, deviceScaleFactor: 1 });
   const host = await hostContext.newPage();
@@ -155,14 +155,18 @@ test('手机创建房间，第二位玩家通过真实 WebRTC 同步战场', asy
   await guest.locator('#readyButton').tap();
   await expect(host.locator('#startRoom')).toBeEnabled();
   await host.locator('#startRoom').tap();
-  await expect(guest.locator('#hud')).toBeVisible();
+  try { await expect(guest.locator('#hud')).toBeVisible(); }
+  catch (error) {
+    for (const [name, view] of [['host', host], ['guest', guest]] as const) console.log('network-start', name, await view.evaluate(() => { const d = (window as any).__tankBattle; return { phase: d.state.phase, paused: d.state.paused, time: d.state.time, fps: d.fps, players: d.state.tanks.filter((t: any) => t.team === 'player') }; }));
+    console.log('network-errors', errors); throw error;
+  }
   await expect.poll(() => guest.evaluate(() => (window as any).__tankBattle.state.tanks.filter((t: any) => t.team === 'player').length)).toBe(2);
   await expect.poll(() => guest.evaluate(() => (window as any).__tankBattle.state.phase), { timeout: 15000 }).toBe('battle');
   const hostState = await host.evaluate(() => (window as any).__tankBattle.state);
   const guestState = await guest.evaluate(() => (window as any).__tankBattle.state);
   expect(hostState.seed).toBe(guestState.seed);
   expect(new TextEncoder().encode(JSON.stringify(hostState)).length).toBeGreaterThan(16300);
-  expect(guestState.version).toBe(8);
+  expect(guestState.version).toBe(9);
   expect(guestState.mapSize).toBe('large');
   expect(guestState.enemyBaseDiscovered).toBe(false);
   expect(guestState.explored.length).toBeGreaterThan(0);
@@ -183,28 +187,47 @@ test('手机创建房间，第二位玩家通过真实 WebRTC 同步战场', asy
   });
   const cdp = await guestContext.newCDPSession(guest);
   const stick = (await guest.locator('#joystick').boundingBox())!;
+  await guest.locator('#boostToggle').tap();
   await cdp.send('Input.dispatchTouchEvent', { type: 'touchStart', touchPoints: [{ x: stick.x + 12, y: stick.y + stick.height / 2, id: 1 }] });
   await expect.poll(() => host.evaluate(() => (window as any).__tankBattle.state.tanks.find((t: any) => t.team === 'player' && t.name !== '房主坦克').x)).toBeGreaterThan(guestBefore.x + 1);
   await cdp.send('Input.dispatchTouchEvent', { type: 'touchEnd', touchPoints: [] });
   await guest.waitForTimeout(600);
+  await guest.locator('#boostToggle').tap();
   const hostGuest = await host.evaluate(() => (window as any).__tankBattle.state.tanks.find((t: any) => t.team === 'player' && t.name !== '房主坦克'));
   const guestSelf = await guest.evaluate(() => {
     const d = (window as any).__tankBattle;
     return d.state.tanks.find((t: any) => t.id === d.localId);
   });
   expect(hostGuest.x).toBeGreaterThan(guestBefore.x + 1);
+  expect(hostGuest.stamina).toBeLessThan(100);
+  expect(Math.abs(hostGuest.stamina - guestSelf.stamina)).toBeLessThan(3);
   expect(hostGuest.z).toBeCloseTo(guestBefore.z);
   expect(Math.abs(hostGuest.x - guestSelf.x)).toBeLessThan(0.4);
   expect(Math.abs(hostGuest.z - guestSelf.z)).toBeLessThan(0.4);
+  await guest.locator('#chargeToggle').tap();
+  const fire = (await guest.locator('#fireButton').boundingBox())!;
+  await cdp.send('Input.dispatchTouchEvent', { type: 'touchStart', touchPoints: [{ id: 2, x: fire.x + fire.width / 2, y: fire.y + fire.height / 2 }] });
+  await expect.poll(() => host.evaluate(id => (window as any).__tankBattle.state.tanks.find((t: any) => t.id === id).charge, guestSelf.id)).toBe(1.6);
+  await expect.poll(() => guest.evaluate(id => (window as any).__tankBattle.state.tanks.find((t: any) => t.id === id).charge, guestSelf.id)).toBe(1.6);
+  await cdp.send('Input.dispatchTouchEvent', { type: 'touchEnd', touchPoints: [] });
+  for (const view of [host, guest]) await expect.poll(() => view.evaluate(id => (window as any).__tankBattle.state.events.filter((e: any) => e.owner === id && e.kind === 'shot' && e.charge === 1).length, guestSelf.id)).toBe(1);
   await guest.locator('#mapToggle').tap();
   const radar = (await guest.locator('#radar').boundingBox())!;
   await guest.touchscreen.tap(radar.x + radar.width / 2, radar.y + radar.height / 2);
   await expect.poll(() => host.evaluate(() => (window as any).__tankBattle.state.pings.length)).toBe(1);
   expect(await host.evaluate(() => (window as any).__tankBattle.state.pings[0].owner)).toBe(guestSelf.id);
   await guest.locator('#mapToggle').tap();
+  await expect.poll(() => guest.evaluate(id => (window as any).__tankBattle.state.tanks.find((t: any) => t.id === id).cooldown, guestSelf.id)).toBe(0);
+  await cdp.send('Input.dispatchTouchEvent', { type: 'touchStart', touchPoints: [{ id: 2, x: fire.x + fire.width / 2, y: fire.y + fire.height / 2 }] });
+  await expect.poll(() => host.evaluate(id => (window as any).__tankBattle.state.tanks.find((t: any) => t.id === id).charge, guestSelf.id)).toBeGreaterThan(0.3);
   await host.locator('#pauseButton').tap();
   await expect.poll(() => guest.evaluate(() => (window as any).__tankBattle.state.paused)).toBe(true);
+  await expect.poll(() => guest.evaluate(id => (window as any).__tankBattle.state.tanks.find((t: any) => t.id === id).charging, guestSelf.id)).toBe(false);
+  await cdp.send('Input.dispatchTouchEvent', { type: 'touchEnd', touchPoints: [] });
   await guest.screenshot({ path: 'artifacts/multiplayer-guest.png' });
+  await host.locator('#resumeButton').tap();
+  await expect.poll(() => guest.evaluate(() => (window as any).__tankBattle.state.paused)).toBe(false);
+  expect(await host.evaluate(id => (window as any).__tankBattle.state.events.filter((e: any) => e.owner === id && e.kind === 'shot' && e.charge !== undefined).length, guestSelf.id)).toBe(1);
   expect(errors).toEqual([]);
   await guestContext.close();
   await hostContext.close();

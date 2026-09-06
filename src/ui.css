@@ -140,6 +140,52 @@ dialog::backdrop { background: #43584650; backdrop-filter: blur(7px); }
 .threat-arrow { position: absolute; transform: translate(-50%, -50%); color: #ffcc91; text-align: center; text-shadow: 0 1px 5px #412e23; pointer-events: none; }
 .threat-arrow i { display: block; font-style: normal; font-size: 24px; }
 .threat-arrow span { display: block; font-size: 10px; margin-top: 3px; white-space: nowrap; }
+
+/* 战斗常驻元素贴边，血条和雷达不再铺设遮挡场景的背景板。 */
+.hud-top { left: max(14px, env(safe-area-inset-left)); right: auto; top: max(14px, env(safe-area-inset-top)); align-items: center; gap: 10px; }
+.hud-top > .icon-button { width: 36px; height: 36px; color: #fff6db; background: transparent; border-color: #f4f0d8b3; filter: drop-shadow(0 1px 2px #334c35); }
+.hud-top .camp-card { width: clamp(130px, 28vw, 178px); padding: 0; background: none; border: 0; box-shadow: none; text-shadow: 0 1px 3px #1c382c; }
+.hud-top .hud-caption { font-size: 10px; letter-spacing: 0; gap: 7px; }
+.hud-top .bar { margin-top: 6px; height: 5px; background: transparent; border: 1px solid #f4f0d88c; box-shadow: 0 1px 3px #24382d45; }
+.radar { top: max(10px, env(safe-area-inset-top)); right: max(12px, env(safe-area-inset-right)); padding: 0; width: 118px; background: transparent; border: 0; backdrop-filter: none; box-shadow: none; }
+.radar span, #mapToggle { color: #f8f5d8; text-shadow: 0 1px 3px #1b382d; letter-spacing: 0; }
+.radar.expanded { background: #edf0d9e8; border: 1px solid #b3c4a0; box-shadow: none; backdrop-filter: none; }
+.radar.expanded #mapToggle, .radar.expanded span, .radar.expanded .map-instructions { color: #314d41; text-shadow: none; }
+.enemy-camp-label { position: absolute; width: 126px; transform: translate(-50%, -100%); text-align: center; color: #fff0d4; text-shadow: 0 1px 3px #462f24; font-size: 10px; pointer-events: none; }
+.enemy-camp-label b { font-weight: 500; margin-left: 4px; font-variant-numeric: tabular-nums; }
+.enemy-camp-label .bar { margin-top: 5px; background: transparent; border: 1px solid #ffe6d280; }
+.enemy-camp-label .bar > i { background: #efa184; }
+.wave { color: #667660; text-shadow: none; padding: 10px 0; }
+.wave b { font-size: 15px; letter-spacing: 1px; }
+.wave small { font-size: 10px; }
+.camera-buttons { display: flex; bottom: 120px; right: max(30px, env(safe-area-inset-right)); }
+.camera-buttons .ability-toggle { display: flex; flex-direction: column; align-items: center; justify-content: center; gap: 1px; padding: 2px; }
+.ability-toggle svg { width: 17px; height: 17px; }
+.ability-toggle small { font-size: 8px; font-weight: 500; }
+#boostToggle.active { background: #459bc8b8; border-color: #abedff; }
+#chargeToggle.active { background: #bf8c40b8; border-color: #ffe0a0; }
+.stamina-meter { position: absolute; left: max(5px, env(safe-area-inset-left)); top: 43%; transform: translateY(-50%); width: 6px; height: min(160px, 28dvh); border: 1px solid #daf3ff99; border-radius: 4px; box-shadow: 0 0 3px #264b6680; overflow: hidden; }
+.stamina-meter > i { position: absolute; bottom: 0; width: 100%; height: 100%; background: linear-gradient(#99e5ff, #4099e0); transition: height .1s linear; }
+.stamina-meter.boosting { box-shadow: 0 0 8px #4fb8e6a6; }
+.stamina-meter.low > i { background: #5d9bc6; }
+.weapon-card { padding: 0; width: 170px; background: none; border: 0; box-shadow: none; backdrop-filter: none; text-shadow: 0 1px 3px #263e30; }
+#fireButton.charging { border-color: #ffd997; box-shadow: 0 0 calc(5px + var(--charge, 0) * 20px) #f7bd5a99; background: #e7ba663b; }
+.crosshair.charging { border-color: #ffd48b; box-shadow: 0 0 12px #eeb66266; }
+#chargeProgress { position: absolute; left: 50%; top: calc(100% + 5px); transform: translateX(-50%); font-size: 10px; white-space: nowrap; color: #ffe0a2; text-shadow: 0 1px 3px #433820; }
+@media (pointer: coarse) {
+  .camera-buttons { display: grid; grid-template-columns: repeat(3, 36px); bottom: 151px; right: max(31px, env(safe-area-inset-right)); }
+}
+@media (max-width: 600px) {
+  .hud-top { left: max(12px, env(safe-area-inset-left)); top: max(12px, env(safe-area-inset-top)); gap: 8px; }
+  .hud-top > .icon-button { width: 32px; height: 32px; }
+  .hud-top .hud-caption { font-size: 9px; }
+  .radar { width: 91px; top: max(8px, env(safe-area-inset-top)); right: max(10px, env(safe-area-inset-right)); }
+}
+@media (max-height: 540px) and (orientation: landscape) {
+  .camera-buttons { display: flex; bottom: 115px; right: max(29px, env(safe-area-inset-right)); }
+  .radar { width: 90px; top: max(7px, env(safe-area-inset-top)); }
+  .hud-top { top: max(9px, env(safe-area-inset-top)); }
+}
 .buff.expiring { border-color: #e4ad76; color: #ffd7a4; animation: buff-pulse 1s ease-in-out infinite alternate; }
 @keyframes buff-pulse { to { background: #7b6148e3; } }
 @media (prefers-reduced-motion: reduce) { .buff.expiring { animation: none; } }

@@ -44,6 +44,26 @@ try {
   assert.equal(await page.evaluate(() => visualViewport.scale), 1);
   assert.match(await page.locator('#pickupLabels [data-power=heal]').textContent(), /满血无需维修/);
   await page.screenshot({ path: 'artifacts/published-battle.png' });
+  await page.locator('#boostToggle').tap();
+  assert.equal(await page.locator('#boostToggle').getAttribute('aria-pressed'), 'true');
+  await page.keyboard.down('KeyW');
+  await page.waitForFunction(() => Number(document.querySelector('#staminaMeter').getAttribute('aria-valuenow')) < 95);
+  await page.keyboard.up('KeyW'); await page.locator('#boostToggle').tap();
+  await page.locator('#chargeToggle').tap();
+  const fire = await page.locator('#fireButton').boundingBox();
+  const chargeTouch = { id: 3, x: fire.x + fire.width / 2, y: fire.y + fire.height / 2 };
+  await cdp.send('Input.dispatchTouchEvent', { type: 'touchStart', touchPoints: [chargeTouch] });
+  await page.waitForFunction(() => document.querySelector('#touchReload').textContent === '松开发射');
+  await page.screenshot({ path: 'artifacts/published-charge.png' });
+  await cdp.send('Input.dispatchTouchEvent', { type: 'touchEnd', touchPoints: [] });
+  await page.waitForFunction(() => /s$/.test(document.querySelector('#touchReload').textContent));
+  assert.equal(await page.locator('#fireButton').evaluate(e => e.classList.contains('charging')), false);
+  await page.waitForFunction(() => document.querySelector('#touchReload').textContent === '蓄力');
+  await cdp.send('Input.dispatchTouchEvent', { type: 'touchStart', touchPoints: [chargeTouch] });
+  await page.waitForFunction(() => document.querySelector('#fireButton').classList.contains('charging'));
+  await cdp.send('Input.dispatchTouchEvent', { type: 'touchCancel', touchPoints: [] });
+  await page.waitForFunction(() => document.querySelector('#touchReload').textContent === '蓄力');
+  assert.equal(await page.locator('#radarPanel').evaluate(e => getComputedStyle(e).backgroundColor), 'rgba(0, 0, 0, 0)');
   await page.locator('#mapToggle').tap();
   assert.equal(await page.locator('#mapToggle').getAttribute('aria-expanded'), 'true');
   await page.locator('#mapToggle').tap();
@@ -81,7 +101,7 @@ try {
   assert.equal(await guest.locator('#difficultyBadge').textContent(), '休闲');
   await guest.screenshot({ path: 'artifacts/published-multiplayer.png' });
   assert.deepEqual(errors, []);
-  console.log(JSON.stringify({ url, http: response.status(), singlePlayer: 'passed', modes: ['classic', 'defense'], careerAndFactory: 'passed', tacticalMap: 'passed', pageZoomGuard: 'passed', difficultySync: 'passed', largeMapSync: 'passed', scoutingHud: 'passed', pickupFeedback: 'passed', mobileLayout: 'passed', publicWebRTC: 'passed', pageErrors: errors }));
+  console.log(JSON.stringify({ url, http: response.status(), singlePlayer: 'passed', boostAndCharge: 'passed', touchCancel: 'passed', transparentHud: 'passed', modes: ['classic', 'defense'], careerAndFactory: 'passed', tacticalMap: 'passed', pageZoomGuard: 'passed', difficultySync: 'passed', largeMapSync: 'passed', scoutingHud: 'passed', pickupFeedback: 'passed', mobileLayout: 'passed', publicWebRTC: 'passed', pageErrors: errors }));
 } finally {
   await browser.close();
 }

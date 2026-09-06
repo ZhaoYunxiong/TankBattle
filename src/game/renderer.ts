@@ -1,5 +1,6 @@
 import { mapFor, inRegion, waterAt, roadDistance, riverSection, type River } from './maps';
 import { fallenTreeShape, TREE_FALL_TIME } from './cover';
+import { chargePower } from './abilities';
 import { Color3, Color4 } from '@babylonjs/core/Maths/math.color';
 import { Matrix, Vector3 } from '@babylonjs/core/Maths/math.vector';
 import { DirectionalLight } from '@babylonjs/core/Lights/directionalLight';
@@ -22,7 +23,7 @@ import { CAMERA } from './camera';
 import { groundHeight, groundSlope, terrainVertex, terrainIntersection, TERRAIN_STEP } from './terrain';
 import { SHOT_HEIGHT, shotSlope, traceShot } from './combat';
 
-type TankVisual = { root: TransformNode; chassis: TransformNode; gun: TransformNode; turret: TransformNode; barrel: Mesh; body: Mesh; shield: Mesh; warning: Mesh; wheels: Mesh[]; speed: number; trailAt: number };
+type TankVisual = { root: TransformNode; chassis: TransformNode; gun: TransformNode; turret: TransformNode; barrel: Mesh; body: Mesh; shield: Mesh; warning: Mesh; glow: Mesh; wheels: Mesh[]; speed: number; slopePitch: number; slopeRoll: number; trailAt: number };
 
 type Particle = { mesh: Mesh; vx: number; vy: number; vz: number; life: number; max: number; grow: number };
 
@@ -448,12 +449,12 @@ export class BattleRenderer {
 
   private drivingTrail(tank: Tank) {
     if (waterAt(tank, this.map) === 'shallow') {
-      this.particle(tank.x, groundHeight(tank.x, tank.z, this.map) + 0.2, tank.z, '#c8e5de', false, 0.18);
-      this.pulse(tank.x, tank.z, 1.1, true);
+      for (let i = 0; i < (tank.boosting ? 3 : 1); i++) this.particle(tank.x, groundHeight(tank.x, tank.z, this.map) + 0.2, tank.z, '#c8e5de', false, tank.boosting ? 0.5 : 0.18);
+      this.pulse(tank.x, tank.z, tank.boosting ? 1.7 : 1.1, true);
       return;
     }
     const x = tank.x - Math.sin(tank.angle), z = tank.z - Math.cos(tank.angle);
-    this.particle(x, groundHeight(x, z, this.map) + 0.15, z, '#c6bfa3', true, 0.2);
+    for (let i = 0; i < (tank.boosting ? 3 : 1); i++) this.particle(x + (i - 1) * (tank.boosting ? 0.4 : 0), groundHeight(x, z, this.map) + 0.15, z, '#c6bfa3', true, tank.boosting ? 0.65 : 0.2);
     for (const side of [-1, 1]) {
       const mark = this.box('track-print', 0.32, 0.018, 0.7, '#7f8065');
       const px = x + Math.cos(tank.angle) * side * 0.87, pz = z - Math.sin(tank.angle) * side * 0.87;
@@ -610,7 +611,9 @@ export class BattleRenderer {
     shield.position.y = 0.11;
     for (const mesh of root.getChildMeshes()) this.shadows.addShadowCaster(mesh);
     if (t.kind === 'heavy') root.scaling.setAll(1.12);
-    return { root, chassis, gun, turret, barrel, body, shield, warning, wheels, speed: 0, trailAt: 0 };
+    const glow = MeshBuilder.CreateIcoSphere('charge-glow', { radius: 0.32, subdivisions: 1, flat: true }, this.scene);
+    glow.parent = gun; glow.position.z = 2.05; glow.material = this.material('#ffe8ab', true); glow.setEnabled(false);
+    return { root, chassis, gun, turret, barrel, body, shield, warning, glow, wheels, speed: 0, slopePitch: 0, slopeRoll: 0, trailAt: 0 };
   }
 
   private particle(x: number, y: number, z: number, color: string, smoke = false, force = 1, material?: BattleEvent['material']) {
@@ -621,7 +624,7 @@ export class BattleRenderer {
     m.material = this.material(color, color === '#f5bc75');
     m.position.set(x, y, z);
     m.rotation.set(Math.random() * 6, Math.random() * 6, Math.random() * 6);
-    if (smoke && force < 1) m.scaling.setAll(0.45);
+    if (smoke && force < 1) m.scaling.setAll(0.35 + force * 0.8);
     const life = smoke ? force < 1 ? 0.65 : 1.6 : material ? 2 : 0.65;
     this.particles.push({
       mesh: m, vx: (Math.random() - 0.5) * (smoke ? 0.6 : 7 * force),
@@ -633,7 +636,7 @@ export class BattleRenderer {
   private handleEvent(event: BattleEvent, local?: Tank) {
     const d = local ? distance(event, local) : 25;
     const falloff = clamp(1 - d / 35, 0, 1);
-    this.audio.play(event.kind, falloff, event.material ?? event.target);
+    this.audio.play(event.kind, falloff, event.charge === undefined ? event.material ?? event.target : 'charged');
     if (event.kind === 'destroy') {
       const force = event.target === 'tank' ? event.owner === local?.id ? 1.5 : 1.15 : event.target === 'base' ? 1.4 : event.size * 0.2;
       this.shake = Math.min(1.65, this.shake + force * falloff);
@@ -650,16 +653,25 @@ export class BattleRenderer {
     } else if (event.kind === 'shot') {
       const tank = this.tankVisuals.get(event.owner ?? '');
       if (tank) {
-        tank.barrel.position.z = 0.92;
+        tank.barrel.position.z = event.charge === undefined ? 0.92 : 0.64;
         const muzzle = tank.turret.getAbsolutePosition();
         const angle = tank.root.rotation.y + tank.turret.rotation.y;
         for (let i = 0; i < 4; i++) this.particle(muzzle.x + Math.sin(angle) * 2, muzzle.y + 0.2 - Math.sin(tank.gun.rotation.x) * 2, muzzle.z + Math.cos(angle) * 2, '#f5bc75');
+        if (event.charge !== undefined) {
+          this.flash.position.copyFrom(muzzle); this.flash.intensity = Math.max(this.flash.intensity, (1 + event.charge * 2) * falloff);
+          for (let i = 0; i < 6; i++) this.particle(muzzle.x + Math.sin(angle) * 2, muzzle.y + 0.4, muzzle.z + Math.cos(angle) * 2, '#f5bc75', false, 0.7 + event.charge);
+        }
       }
-      if (event.owner === local?.id) this.shake = Math.max(this.shake, Math.min(0.25, this.shake + 0.1));
+      if (event.charge !== undefined) this.shake = Math.min(1.65, this.shake + (0.25 + event.charge * 0.95) * falloff);
+      else if (event.owner === local?.id) this.shake = Math.max(this.shake, Math.min(0.25, this.shake + 0.1));
     } else if (event.kind === 'hit') {
       this.shake = Math.max(this.shake, Math.min(0.4, this.shake + 0.08 * falloff));
       for (let i = 0; i < 4; i++) this.particle(event.x, event.y ?? groundHeight(event.x, event.z, this.map) + 0.7, event.z, '#edc788');
       if (waterAt(event, this.map)) this.pulse(event.x, event.z, 1.7, true);
+      if (event.charge !== undefined) {
+        this.pulse(event.x, event.z, 1.5 + event.charge * 2.5, !!waterAt(event, this.map));
+        for (let i = 0; i < 6; i++) this.particle(event.x, event.y ?? groundHeight(event.x, event.z, this.map) + 0.5, event.z, '#efc58c', false, 0.8 + event.charge);
+      }
     } else if (event.kind === 'pickup') {
       for (let i = 0; i < 8; i++) this.particle(event.x, groundHeight(event.x, event.z, this.map) + 1, event.z, '#b5ddbc');
     }
@@ -696,18 +708,23 @@ export class BattleRenderer {
       visual.root.setEnabled(t.hp > 0 && t.connected && (t.team === 'player' || state.visibleEnemies.includes(t.id)));
       const travel = Math.hypot(t.x - visual.root.position.x, t.z - visual.root.position.z) * lerp;
       const speed = travel / Math.max(dt, 0.001);
-      const acceleration = clamp((speed - visual.speed) * 0.035, -0.05, 0.05);
-      visual.speed = speed;
+      visual.speed += (speed - visual.speed) * (1 - Math.exp(-dt * 10));
       for (const wheel of visual.wheels) wheel.rotation.x += travel * 4;
-      if (visual.root.isEnabled() && speed > 0.5 && this.elapsed > visual.trailAt) { this.drivingTrail(t); visual.trailAt = this.elapsed + (this.lowQuality ? 0.3 : 0.18); }
+      if (visual.root.isEnabled() && speed > 0.5 && this.elapsed > visual.trailAt) { this.drivingTrail(t); visual.trailAt = this.elapsed + (this.lowQuality ? 0.3 : 0.18) * (t.boosting ? 0.55 : 1); }
       visual.root.position.x += (t.x - visual.root.position.x) * lerp;
       visual.root.position.z += (t.z - visual.root.position.z) * lerp;
       visual.root.position.y = groundHeight(visual.root.position.x, visual.root.position.z, this.map);
       visual.root.rotation.y += angleDiff(t.angle, visual.root.rotation.y) * lerp;
       const slope = groundSlope(visual.root.position.x, visual.root.position.z, this.map);
       const heading = visual.root.rotation.y;
-      visual.chassis.rotation.x = -Math.atan(slope.x * Math.sin(heading) + slope.z * Math.cos(heading)) + acceleration;
-      visual.chassis.rotation.z = Math.atan(slope.x * Math.cos(heading) - slope.z * Math.sin(heading)) + Math.sin(this.elapsed * 11) * Math.min(0.012, speed * 0.002);
+      // 地面姿态只跟随平滑后的坡度；匀速行驶不再人为周期摆动。
+      const settle = 1 - Math.exp(-dt * 12), recoil = t.recoil ?? 0;
+      visual.slopePitch += (-Math.atan(slope.x * Math.sin(heading) + slope.z * Math.cos(heading)) - visual.slopePitch) * settle;
+      visual.slopeRoll += (Math.atan(slope.x * Math.cos(heading) - slope.z * Math.sin(heading)) - visual.slopeRoll) * settle;
+      const kick = recoil * (0.12 + Math.sin(state.time * 42) * 0.08), recoilAngle = t.turret - heading;
+      visual.chassis.rotation.x = visual.slopePitch - kick * Math.cos(recoilAngle);
+      visual.chassis.rotation.z = visual.slopeRoll + kick * Math.sin(recoilAngle);
+      visual.chassis.position.set(Math.sin(state.time * 36) * recoil * 0.035, Math.sin(state.time * 45) * recoil * 0.045, 0);
       visual.gun.rotation.x += (-Math.atan(shotSlope(state, t)) - visual.gun.rotation.x) * lerp;
       visual.turret.rotation.y += angleDiff(t.turret - visual.root.rotation.y, visual.turret.rotation.y) * lerp;
       visual.barrel.position.z += (1.13 - visual.barrel.position.z) * Math.min(1, dt * 12);
@@ -716,6 +733,8 @@ export class BattleRenderer {
       visual.warning.setEnabled(t.team === 'enemy' && t.warning > 0);
       visual.warning.scaling.setAll(0.65 + t.warning * 0.9);
       visual.warning.visibility = 0.65 + Math.sin(this.elapsed * 22) * 0.3;
+      visual.glow.setEnabled(t.charging);
+      visual.glow.scaling.setAll(0.4 + chargePower(t.charge) * 1.2 + Math.sin(this.elapsed * 12) * 0.08);
     }
     for (const [id, visual] of this.tankVisuals) {
       if (!state.tanks.some(t => t.id === id)) { visual.root.dispose(); this.tankVisuals.delete(id); }
@@ -723,8 +742,13 @@ export class BattleRenderer {
     for (const s of state.shells) {
       let mesh = this.shells.get(s.id);
       if (!mesh) {
-        mesh = this.box('shell', 0.12, 0.12, 0.85, '#ffe1a2');
-        mesh.material = this.material('#ffdc92', true);
+        const charged = s.power !== undefined;
+        mesh = this.box(charged ? 'charged-shell' : 'shell', charged ? 0.26 : 0.12, charged ? 0.26 : 0.12, charged ? 1.1 : 0.85, '#ffe1a2');
+        mesh.material = this.material(charged ? '#fff1c4' : '#ffdc92', true);
+        if (charged) {
+          const tail = this.box('charged-trail', 0.14, 0.14, 1.4 + s.power! * 1.4, '#ffc67e', mesh);
+          tail.position.z = -1.25; tail.material = this.material('#ffc67e', true); tail.visibility = 0.55;
+        }
         this.shells.set(s.id, mesh);
       }
       mesh.position.set(s.x, s.y, s.z);

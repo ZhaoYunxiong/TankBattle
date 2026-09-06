@@ -29,7 +29,11 @@ test('普通单人经典模式探索、过桥、回攻与通关', async ({ page 
       await drive('z', -22);
       await drive('x', 25.8);
       await expect.poll(() => page.evaluate(() => (window as any).__tankBattle.state.enemyBaseDiscovered)).toBe(true);
-      await expect(page.locator('#enemyBaseCard')).toBeVisible();
+      const attacker = await page.evaluate(() => (window as any).__tankBattle.state.tanks[0]);
+      // 侦察整局保留，但阵地血条只在镜头里显示；阵亡回营后不能再要求其常驻。
+      if (attacker.hp <= 0 || attacker.z > -21 || Math.abs(attacker.x - 26) > 2) continue;
+      if (await page.evaluate(() => (window as any).__tankBattle.state.enemyBaseHp > 0)) await expect(page.locator('#enemyBaseCard')).toBeVisible();
+      expect(await page.locator('#enemyBaseCard').evaluate(e => e.closest('.hud-top') === null)).toBe(true);
       await page.screenshot({ path: 'artifacts/classic-enemy-camp.png' });
       const deadline = Date.now() + 50000;
       let right = false;

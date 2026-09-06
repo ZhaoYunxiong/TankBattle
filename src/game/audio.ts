@@ -46,8 +46,8 @@ export class BattleAudio {
     const start = ctx.currentTime;
     const gain = ctx.createGain();
     gain.connect(ctx.destination);
-    const duration = kind === 'destroy' ? material === 'tank' || material === 'base' ? 0.85 : 0.4 : kind === 'pickup' ? 0.22 : 0.13;
-    gain.gain.setValueAtTime(Math.max(0.001, volume * (kind === 'destroy' ? 0.15 : 0.075)), start);
+    const duration = kind === 'destroy' ? material === 'tank' || material === 'base' ? 0.85 : 0.4 : material === 'charged' ? 0.3 : kind === 'pickup' ? 0.22 : 0.13;
+    gain.gain.setValueAtTime(Math.max(0.001, volume * (kind === 'destroy' ? 0.15 : material === 'charged' ? 0.12 : 0.075)), start);
     gain.gain.exponentialRampToValueAtTime(0.001, start + duration);
     if (kind === 'pickup' || kind === 'wave') {
       const oscillator = ctx.createOscillator();

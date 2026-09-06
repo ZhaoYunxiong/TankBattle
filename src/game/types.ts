@@ -19,6 +19,9 @@ export interface Input {
   moveZ: number;
   aim: number;
   fire: boolean;
+  boost?: boolean;
+  chargeMode?: boolean;
+  cancelCharge?: number;
 }
 
 export interface Tank {
@@ -34,6 +37,12 @@ export interface Tank {
   hp: number;
   maxHp: number;
   cooldown: number;
+  stamina: number;
+  boosting: boolean;
+  boostLocked: boolean;
+  charging: boolean;
+  charge: number;
+  recoil: number;
   warning: number;
   exposedUntil: number;
   lives: number;
@@ -76,6 +85,7 @@ export interface Shell {
   vz: number;
   damage: number;
   life: number;
+  power?: number;
 }
 
 export interface Drop {
@@ -100,13 +110,14 @@ export interface BattleEvent {
   target?: 'tank' | 'base';
   sourceX?: number;
   sourceZ?: number;
+  charge?: number;
 }
 
 export interface Scar { id: number; x: number; z: number; radius: number; kind: 'crater' | 'impact'; surface: 'earth' | 'stone' | 'bridge'; rotation: number }
 
 export interface Ping { owner: string; x: number; z: number; until: number }
 
-export const PROTOCOL_VERSION = 8;
+export const PROTOCOL_VERSION = 9;
 
 export interface State {
   version: typeof PROTOCOL_VERSION;
@@ -190,5 +201,7 @@ export function cleanInput(value: unknown): Input | null {
   const z = clamp(i.moveZ, -1, 1);
   // 房主也限制向量长度，斜向移动和网络输入都不能超过正常速度。
   const length = Math.max(1, Math.hypot(x, z));
-  return { moveX: x / length, moveZ: z / length, aim: Math.atan2(Math.sin(i.aim), Math.cos(i.aim)), fire: i.fire === true };
+  return { moveX: x / length, moveZ: z / length, aim: Math.atan2(Math.sin(i.aim), Math.cos(i.aim)), fire: i.fire === true,
+    ...(i.boost === true ? { boost: true } : {}), ...(i.chargeMode === true ? { chargeMode: true } : {}),
+    ...(Number.isSafeInteger(i.cancelCharge) && i.cancelCharge! >= 0 && i.cancelCharge! <= 1e9 ? { cancelCharge: i.cancelCharge } : {}) };
 }

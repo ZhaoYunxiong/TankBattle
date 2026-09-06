@@ -16,6 +16,12 @@ export class Controls {
 
   freeLook = false;
 
+  boost = false;
+
+  chargeMode = false;
+
+  onChange: () => void = () => {};
+
   onPause: () => void = () => {};
 
   onRecenter: () => void = () => {};
@@ -34,16 +40,21 @@ export class Controls {
 
   private lastAim = Math.PI;
 
+  private cancelSequence = 0;
+
   constructor(private renderer: BattleRenderer, canvas: HTMLCanvasElement, stick: HTMLElement, fire: HTMLElement) {
     window.addEventListener('keydown', e => {
       if ((e.target as HTMLElement).matches('input, select, textarea')) return;
-      if (e.code === 'Escape' && this.enabled) { this.reset(); this.onPause(); return; }
+      if (e.code === 'Escape' && this.enabled) { e.preventDefault(); this.reset(); this.onPause(); return; }
       if (!this.enabled) return;
+      if (!e.repeat && e.code === 'KeyB') { this.boost = !this.boost; this.onChange(); return; }
+      if (!e.repeat && e.code === 'KeyQ') { this.setChargeMode(!this.chargeMode); return; }
       if (['Space', 'ArrowUp', 'ArrowDown', 'ArrowLeft', 'ArrowRight', 'AltLeft', 'AltRight'].includes(e.code)) e.preventDefault();
       this.keys.add(e.code);
       if (e.code === 'KeyC') this.onRecenter();
+      if (!e.repeat) this.onChange();
     });
-    window.addEventListener('keyup', e => this.keys.delete(e.code));
+    window.addEventListener('keyup', e => { this.keys.delete(e.code); this.onChange(); });
     window.addEventListener('blur', () => this.reset());
     document.addEventListener('visibilitychange', () => { if (document.hidden) this.reset(); });
     canvas.addEventListener('contextmenu', e => e.preventDefault());
@@ -61,6 +72,7 @@ export class Controls {
           try { void canvas.requestPointerLock()?.catch(() => {}); } catch { /* 浏览器不允许锁定时仍可拖动瞄准。 */ }
         }
       }
+      this.onChange();
     };
     const aimMove = (e: PointerEvent) => {
       if (!this.enabled || (e.pointerId !== this.lookPointer && document.pointerLockElement !== canvas)) return;
@@ -71,7 +83,10 @@ export class Controls {
       this.previous = { x: e.clientX, y: e.clientY };
     };
     const aimUp = (e: PointerEvent) => {
-      if (e.pointerId === this.lookPointer) { this.lookPointer = -1; this.firing = false; }
+      if (e.pointerId === this.lookPointer) {
+        if (e.type === 'pointercancel' || e.type === 'lostpointercapture') this.cancelSequence = (this.cancelSequence + 1) % 1e9;
+        this.lookPointer = -1; this.firing = false; this.onChange();
+      }
     };
     canvas.addEventListener('pointerdown', aimDown);
     canvas.addEventListener('pointermove', aimMove);
@@ -81,7 +96,7 @@ export class Controls {
       // 鼠标进入指针锁定也会释放捕获，此时仍然需要保持按住开火。
       if (document.pointerLockElement !== canvas) aimUp(e);
     });
-    window.addEventListener('mouseup', () => { this.firing = false; fire.classList.remove('pressed'); });
+    window.addEventListener('mouseup', () => { this.firing = false; fire.classList.remove('pressed'); this.onChange(); });
     canvas.addEventListener('wheel', e => {
       if (!this.enabled) return;
       e.preventDefault();
@@ -118,6 +133,7 @@ export class Controls {
     fire.addEventListener('pointerdown', e => {
       aimDown(e);
       if (this.lookPointer === e.pointerId) { this.firing = true; fire.classList.add('pressed'); }
+      this.onChange();
     });
     fire.addEventListener('pointermove', aimMove);
     const fireUp = (e: PointerEvent) => {
@@ -131,6 +147,7 @@ export class Controls {
   }
 
   reset() {
+    this.cancelSequence = (this.cancelSequence + 1) % 1e9;
     this.keys.clear();
     this.firing = false;
     this.joystick = { x: 0, y: 0 };
@@ -139,10 +156,19 @@ export class Controls {
     document.getElementById('fireButton')?.classList.remove('pressed');
     const knob = document.querySelector<HTMLElement>('#joystick > span');
     if (knob) knob.style.transform = '';
+    this.onChange();
+  }
+
+  setChargeMode(enabled: boolean) {
+    this.chargeMode = enabled;
+    this.cancelSequence = (this.cancelSequence + 1) % 1e9;
+    this.firing = false; this.keys.delete('Space');
+    document.getElementById('fireButton')?.classList.remove('pressed');
+    this.onChange();
   }
 
   read(): Input {
-    if (!this.enabled) return { moveX: 0, moveZ: 0, aim: this.lastAim, fire: false };
+    if (!this.enabled) return { moveX: 0, moveZ: 0, aim: this.lastAim, fire: false, cancelCharge: this.cancelSequence };
     if (!this.freeLook && !this.keys.has('AltLeft') && !this.keys.has('AltRight')) this.lastAim = this.renderer.yaw;
     const key = (code: string) => this.keys.has(code) ? 1 : 0;
     const right = clamp(key('KeyD') + key('ArrowRight') - key('KeyA') - key('ArrowLeft') + this.joystick.x, -1, 1);
@@ -150,6 +176,7 @@ export class Controls {
     return {
       ...cameraRelativeMovement(right, forward, this.renderer.yaw),
       aim: this.lastAim, fire: this.firing || this.keys.has('Space'),
+      boost: this.boost, chargeMode: this.chargeMode, cancelCharge: this.cancelSequence,
     };
   }
 }
