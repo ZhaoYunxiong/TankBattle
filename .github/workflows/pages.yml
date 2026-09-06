@@ -32,7 +32,7 @@ jobs:
       - name: 安装浏览器
         run: npx playwright install --with-deps chromium
       - name: 验证桌面与手机交互
-        run: npm run test:e2e -- --grep "桌面|竖屏|工厂|弹坑|掩护|蓄力"
+        run: npm run test:e2e -- --grep "桌面|竖屏|工厂|弹坑|掩护|蓄力|防御塔|震动"
       - name: 构建网页
         run: npm run build
       - name: 配置 GitHub Pages

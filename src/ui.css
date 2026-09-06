@@ -228,3 +228,10 @@ dialog::backdrop { background: #43584650; backdrop-filter: blur(7px); }
   .menu-footer { letter-spacing: 0.5px; gap: 8px; }
   #careerButton { font-size: 10px; }
 }
+
+.site-label { position:absolute; width:126px; transform:translate(-50%,-100%); text-align:center; pointer-events:none; color:#f8f4dc; text-shadow:0 1px 3px #415747; font-size:11px; }
+.site-label b { font-weight:600; }
+.site-label small { display:block; font-size:10px; margin-top:3px; }
+.site-label .bar { height:4px; margin-top:3px; background:#fff7d540; }
+.site-label .bar i { background:var(--site-color); }
+.site-label .capture-bar i { background:#f5e6ab; }

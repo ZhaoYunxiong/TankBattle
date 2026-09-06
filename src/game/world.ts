@@ -39,6 +39,8 @@ export function createMap(seed: number, mode: GameMode = 'classic', map = mapFor
     if (firstGrass && (segmentCircle(map.spawn.x, map.spawn.z, firstGrass.x, map.spawn.z, x, z, radius + 1.6) !== null ||
       segmentCircle(firstGrass.x, map.spawn.z, firstGrass.x, firstGrass.z, x, z, radius + 1.6) !== null)) continue;
     if ([map.base, map.enemyBase, map.spawn, map.enemySpawn].some(p => distance(p, { x, z }) < 10)) continue;
+    // 据点周围和到最近道路的入口留空，占领圈不能被随机树林封死。
+    if (map.sites.some(p => distance(p, { x, z }) < 8)) continue;
     if (map.grass.some(g => inRegion({ x, z }, g, 1.4))) continue;
     if (result.some(o => distance(o, { x, z }) < o.radius + radius + (rock ? 1.4 : 0.4))) continue;
     const height = rock ? variant === 'low' ? 0.85 : variant === 'layered' ? 4.5 : 3 : 2.2 + Math.pow(random(), 0.8) * (variant === 'pine' ? 5.6 : variant === 'birch' ? 4.8 : 4);
@@ -55,7 +57,9 @@ export function createMap(seed: number, mode: GameMode = 'classic', map = mapFor
   return result;
 }
 
-export function blocked(x: number, z: number, obstacles: Obstacle[], radius = 0.85, mode: GameMode = 'classic', map = mapFor()) {
+export type Solid = Pick<Obstacle, 'id' | 'x' | 'z' | 'radius' | 'hp'>;
+
+export function blocked(x: number, z: number, obstacles: Solid[], radius = 0.85, mode: GameMode = 'classic', map = mapFor()) {
   if (Math.abs(x) > map.arena.x - radius || Math.abs(z) > map.arena.z - radius || waterBlocked({ x, z }, map, radius)) return true;
   if (distance({ x, z }, map.base) < map.base.radius + radius) return true;
   if (mode === 'classic' && distance({ x, z }, map.enemyBase) < map.enemyBase.radius + radius) return true;
@@ -63,11 +67,11 @@ export function blocked(x: number, z: number, obstacles: Obstacle[], radius = 0.
 }
 
 // 占用网格只在障碍摧毁后重建，避免大地图的每一步 A* 扫描全部树木。
-const navigation = new WeakMap<Obstacle[], { signature: string; cells: Uint8Array }>();
+const navigation = new WeakMap<Solid[], { signature: string; cells: Uint8Array }>();
 
 const waterEdges = new WeakMap<MapDefinition, Map<number, boolean>>();
 
-function navGrid(obstacles: Obstacle[], mode: GameMode, map: MapDefinition) {
+function navGrid(obstacles: Solid[], mode: GameMode, map: MapDefinition) {
   const signature = map.id + mode + obstacles.filter(o => o.hp > 0).map(o => o.id).join(',');
   const previous = navigation.get(obstacles);
   if (previous?.signature === signature) return previous.cells;
@@ -114,7 +118,7 @@ class Frontier {
   }
 }
 
-export function findPath(start: Point, end: Point, obstacles: Obstacle[], mode: GameMode = 'classic', map = mapFor(), exact = false) {
+export function findPath(start: Point, end: Point, obstacles: Solid[], mode: GameMode = 'classic', map = mapFor(), exact = false) {
   const width = map.arena.x - 1, height = map.arena.z - 1;
   const point = (id: number) => ({ x: (id % width) * 2 - map.arena.x + 2, z: Math.floor(id / width) * 2 - map.arena.z + 2 });
   const cell = (p: Point) => Math.max(0, Math.min(width - 1, Math.round((p.x + map.arena.x - 2) / 2))) + Math.max(0, Math.min(height - 1, Math.round((p.z + map.arena.z - 2) / 2))) * width;

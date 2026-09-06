@@ -167,7 +167,7 @@ test('手机创建房间，第二位玩家通过真实 WebRTC 同步战场', asy
   const guestState = await guest.evaluate(() => (window as any).__tankBattle.state);
   expect(hostState.seed).toBe(guestState.seed);
   expect(new TextEncoder().encode(JSON.stringify(hostState)).length).toBeGreaterThan(16300);
-  expect(guestState.version).toBe(9);
+  expect(guestState.version).toBe(10);
   expect(guestState.mapSize).toBe('large');
   expect(guestState.enemyBaseDiscovered).toBe(false);
   expect(guestState.explored.length).toBeGreaterThan(0);
@@ -182,6 +182,8 @@ test('手机创建房间，第二位玩家通过真实 WebRTC 同步战场', asy
   expect(guestState.mode).toBe(hostState.mode);
   expect(guestState.enemyBaseHp).toBe(hostState.enemyBaseHp);
   expect(hostState.obstacles).toEqual(guestState.obstacles);
+  expect(hostState.sites).toEqual(guestState.sites);
+  expect(guestState.sites.filter((s: any) => s.kind === 'tower')).toHaveLength(9);
   const guestBefore = await guest.evaluate(() => {
     const d = (window as any).__tankBattle;
     return d.state.tanks.find((t: any) => t.id === d.localId);
@@ -232,6 +234,21 @@ test('手机创建房间，第二位玩家通过真实 WebRTC 同步战场', asy
   await host.locator('#resumeButton').tap();
   await expect.poll(() => guest.evaluate(() => (window as any).__tankBattle.state.paused)).toBe(false);
   expect(await host.evaluate(id => (window as any).__tankBattle.state.events.filter((e: any) => e.owner === id && e.kind === 'shot' && e.charge !== undefined).length, guestSelf.id)).toBe(1);
+  // 客机通过实际摇杆驶入补给圈，验证占领由房主计算并同步给两端。
+  const move = async (x: number, y: number, axis: 'x' | 'z', goal: number, less: boolean) => {
+    await cdp.send('Input.dispatchTouchEvent', { type: 'touchStart', touchPoints: [{ id: 1, x, y }] });
+    const position = expect.poll(() => guest.evaluate(axis => {
+      const d = (window as any).__tankBattle; return d.state.tanks.find((t: any) => t.id === d.localId)[axis];
+    }, axis));
+    if (less) await position.toBeLessThan(goal); else await position.toBeGreaterThan(goal);
+    await cdp.send('Input.dispatchTouchEvent', { type: 'touchEnd', touchPoints: [] });
+  };
+  await move(stick.x + stick.width - 12, stick.y + stick.height / 2, 'x', -39.5, true);
+  await move(stick.x + stick.width / 2, stick.y + 12, 'z', 66, true);
+  await move(stick.x + 12, stick.y + stick.height / 2, 'x', -35, false);
+  for (const view of [host, guest]) await expect.poll(() => view.evaluate(() => (window as any).__tankBattle.state.sites.find((s: any) => s.kind === 'supply').team)).toBe('player');
+  expect(await host.evaluate(id => (window as any).__tankBattle.state.tanks.find((t: any) => t.id === id).stats.objectives, guestSelf.id)).toBe(1);
+  await guest.screenshot({ path: 'artifacts/multiplayer-captured-supply.png' });
   expect(errors).toEqual([]);
   await guestContext.close();
   await hostContext.close();

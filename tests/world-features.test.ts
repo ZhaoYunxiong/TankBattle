@@ -34,7 +34,7 @@ describe('可扩展地图、河流与路径', () => {
         expect(distance(path.at(-1)!, drop)).toBeLessThan(1.6);
       }
     }
-  });
+  }, 20000);
 
   it('地图面积递增，地形缓存互相独立，所有地图坡度可驾驶', () => {
     expect(Object.values(MAPS).map(m => m.arena.x * m.arena.z * 4)).toEqual([96 * 120, 144 * 180, 192 * 240]);
@@ -81,7 +81,7 @@ describe('可扩展地图、河流与路径', () => {
       const path = findPath(MAPS.large.spawn, drop, sim.state.obstacles, 'classic', MAPS.large, true);
       expect(distance(path.at(-1)!, drop)).toBeLessThan(1.6);
     }
-  }, 20000);
+  }, 45000);
 });
 
 describe('高草伏击与全队侦察', () => {

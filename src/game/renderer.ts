@@ -1,6 +1,7 @@
 import { mapFor, inRegion, waterAt, roadDistance, riverSection, type River } from './maps';
 import { fallenTreeShape, TREE_FALL_TIME } from './cover';
 import { chargePower } from './abilities';
+import { SITE, SITE_COLORS } from './sites';
 import { Color3, Color4 } from '@babylonjs/core/Maths/math.color';
 import { Matrix, Vector3 } from '@babylonjs/core/Maths/math.vector';
 import { DirectionalLight } from '@babylonjs/core/Lights/directionalLight';
@@ -16,7 +17,7 @@ import '@babylonjs/core/Lights/Shadows/shadowGeneratorSceneComponent';
 import { StandardMaterial } from '@babylonjs/core/Materials/standardMaterial';
 import { TransformNode } from '@babylonjs/core/Meshes/transformNode';
 import { VertexData } from '@babylonjs/core/Meshes/mesh.vertexData';
-import { angleDiff, clamp, COLORS, distance, type BattleEvent, type GameMode, type Obstacle, type Scar, type State, type Tank } from './types';
+import { angleDiff, clamp, COLORS, distance, type BattleEvent, type GameMode, type Obstacle, type Scar, type Site, type State, type Tank } from './types';
 import { seededRandom, segmentCircle } from './world';
 import { BattleAudio } from './audio';
 import { CAMERA } from './camera';
@@ -44,7 +45,9 @@ export class BattleRenderer {
 
   shakeEnabled = true;
 
-  shakeStrength = 1;
+  shakeStrength = 1.4;
+
+  private siteVisuals = new Map<number, { root: TransformNode; intact: TransformNode; ruin: TransformNode; gun: TransformNode; trim: Mesh; beacon: Mesh; circle: ReturnType<typeof MeshBuilder.CreateLines>; range: ReturnType<typeof MeshBuilder.CreateLines> }>();
 
   private shadows: ShadowGenerator;
 
@@ -192,6 +195,7 @@ export class BattleRenderer {
     for (const visual of this.tankVisuals.values()) visual.root.dispose();
     this.tankVisuals.clear();
     this.camps.clear();
+    this.siteVisuals.clear();
     this.seed = state.seed;
     this.matchId = state.matchId;
     this.map = mapFor(state.mapSize);
@@ -466,6 +470,72 @@ export class BattleRenderer {
     while (this.tracks.length > (this.lowQuality ? 36 : 90)) this.tracks.shift()!.mesh.dispose();
   }
 
+  private buildSite(site: Site) {
+    const root = new TransformNode('site-' + site.id, this.scene); root.parent = this.terrain;
+    root.position.set(site.x, groundHeight(site.x, site.z, this.map), site.z);
+    const intact = new TransformNode('site-intact', this.scene); intact.parent = root;
+    const platform = this.cylinder('site-foundation', 3.6, 4.1, 0.65, '#c9c3aa', intact, 8); platform.position.y = 0.16;
+    const gun = new TransformNode('tower-gun', this.scene); gun.parent = intact;
+    let trim: Mesh;
+    if (site.kind === 'tower') {
+      const pillar = this.cylinder('tower-pillar', 1.9, 2.7, 2.1, '#d7d0b6', intact, 6); pillar.position.y = 1.5;
+      for (const side of [-1, 1]) {
+        const brace = this.box('tower-brace', 0.35, 1.7, 1.4, '#929d88', intact); brace.position.set(side * 1.15, 1.2, 0);
+      }
+      trim = this.cylinder('tower-collar', 2.8, 2.8, 0.3, SITE_COLORS[site.team], intact, 8); trim.position.y = 2.55;
+      gun.position.y = 2.8;
+      const turret = this.box('tower-turret', 1.85, 0.7, 1.8, '#748574', gun); turret.position.y = 0.2;
+      const barrel = this.box('tower-barrel', 0.38, 0.38, 2, '#566659', gun); barrel.position.set(0, 0.3, 1.3);
+      const muzzle = this.box('tower-muzzle', 0.52, 0.5, 0.4, '#bbbd9d', gun); muzzle.position.set(0, 0.3, 2.3);
+    } else {
+      const crate = this.box('supply-station', 2.4, 1.3, 1.8, '#e4d9b8', intact); crate.position.y = 1;
+      trim = this.box('supply-roof', 2.9, 0.25, 2.3, SITE_COLORS[site.team], intact); trim.position.y = 1.8;
+      for (const horizontal of [true, false]) {
+        const cross = this.box('repair-cross', horizontal ? 0.9 : 0.26, horizontal ? 0.26 : 0.9, 0.06, '#eff3dc', intact);
+        cross.position.set(0, 1, 0.94);
+      }
+    }
+    const beacon = this.cylinder('site-beacon', 0.28, 0.28, 0.6, SITE_COLORS[site.team], gun, 4);
+    beacon.position.set(0, site.kind === 'tower' ? 1 : 2.2, -0.5);
+    const ring = (name: string, radius: number) => {
+      const points = Array.from({ length: 65 }, (_, i) => {
+        const angle = i / 64 * Math.PI * 2, x = site.x + Math.sin(angle) * radius, z = site.z + Math.cos(angle) * radius;
+        return new Vector3(x - site.x, groundHeight(x, z, this.map) - root.position.y + 0.07, z - site.z);
+      });
+      const line = MeshBuilder.CreateLines(name, { points }, this.scene); line.parent = root; line.isPickable = false; return line;
+    };
+    const circle = ring('capture-circle', SITE.captureRadius), range = ring('tower-range', SITE.range);
+    const ruin = new TransformNode('tower-ruins', this.scene); ruin.parent = root;
+    const foundation = this.cylinder('broken-tower-base', 2.5, 3.7, 0.8, '#878b77', ruin, 7); foundation.position.y = 0.25;
+    for (let i = 0; i < 5; i++) {
+      const debris = this.box('tower-rubble', 0.65 + i * 0.12, 0.6 + i % 2 * 0.4, 0.85, i % 2 ? '#9da28b' : '#c0bba1', ruin);
+      debris.position.set(Math.sin(i * 2.4) * 1.6, 0.4, Math.cos(i * 2.4) * 1.6); debris.rotation.set(i * 0.15, i, 0.3);
+    }
+    const wreck = this.box('fallen-tower-gun', 0.5, 0.5, 2.8, '#657464', ruin); wreck.position.set(1.5, 0.6, 0); wreck.rotation.set(0.25, 0.8, 0.4);
+    ruin.setEnabled(false);
+    for (const mesh of root.getChildMeshes()) if (mesh !== circle && mesh !== range) this.shadows.addShadowCaster(mesh);
+    const visual = { root, intact, ruin, gun, trim, beacon, circle, range }; this.siteVisuals.set(site.id, visual); return visual;
+  }
+
+  private renderSites(state: State, local: Tank | undefined, dt: number) {
+    for (const site of state.sites) {
+      const visual = this.siteVisuals.get(site.id) ?? this.buildSite(site);
+      const color = site.contested ? '#f1dfb7' : SITE_COLORS[site.team];
+      visual.intact.setEnabled(site.hp > 0); visual.ruin.setEnabled(site.hp <= 0);
+      visual.trim.material = this.material(color);
+      visual.beacon.material = this.material(site.warning > 0 ? '#ffe6ac' : color, true);
+      visual.beacon.scaling.setAll(site.warning > 0 ? 1 + Math.sin(state.time * 24) * 0.25 : 1);
+      visual.gun.rotation.y += angleDiff(site.angle, visual.gun.rotation.y) * (1 - Math.exp(-dt * 15));
+      visual.circle.color = Color3.FromHexString(site.captureTeam === 'neutral' ? color : SITE_COLORS[site.captureTeam]);
+      visual.circle.setEnabled(site.hp > 0 && site.capturable && !!local && distance(site, local) < 17);
+      visual.range.color = Color3.FromHexString('#e8ad89');
+      visual.range.setEnabled(site.hp > 0 && site.kind === 'tower' && site.team === 'enemy' && !!local && distance(site, local) < SITE.range + 4);
+      if (site.hp > 0 && site.kind === 'tower' && site.hp < site.maxHp * 0.4 && this.smokeClock > 0.18 && (!local || distance(site, local) < 65)) {
+        this.particle(site.x, visual.root.position.y + 3, site.z, '#8d9184', true);
+      }
+    }
+  }
+
   private buildCamp(team: Tank['team']) {
     const enemy = team === 'enemy';
     const position = enemy ? this.map.enemyBase : this.map.base;
@@ -636,9 +706,9 @@ export class BattleRenderer {
   private handleEvent(event: BattleEvent, local?: Tank) {
     const d = local ? distance(event, local) : 25;
     const falloff = clamp(1 - d / 35, 0, 1);
-    this.audio.play(event.kind, falloff, event.charge === undefined ? event.material ?? event.target : 'charged');
+    this.audio.play(event.kind === 'capture' ? 'pickup' : event.kind, falloff, event.charge === undefined ? event.material ?? event.target : 'charged');
     if (event.kind === 'destroy') {
-      const force = event.target === 'tank' ? event.owner === local?.id ? 1.5 : 1.15 : event.target === 'base' ? 1.4 : event.size * 0.2;
+      const force = event.target === 'tank' ? event.owner === local?.id ? 1.5 : 1.15 : event.target === 'base' || event.target === 'tower' ? 1.4 : event.size * 0.2;
       this.shake = Math.min(1.65, this.shake + force * falloff);
       if (event.material === 'tree' && event.obstacle !== undefined) this.fallen.set(event.obstacle, 0);
       if (event.target) {
@@ -651,6 +721,9 @@ export class BattleRenderer {
       for (let i = 0; i < (this.lowQuality ? 8 : 18); i++) this.particle(event.x, groundHeight(event.x, event.z, this.map) + 1, event.z, event.material === 'tree' ? '#91a080' : event.material ? '#c8bba2' : i % 3 ? '#a59b84' : '#f5bc75', false, event.size, event.material);
       for (let i = 0; i < 5; i++) this.particle(event.x, groundHeight(event.x, event.z, this.map) + 1, event.z, '#9b9e90', true);
     } else if (event.kind === 'shot') {
+      if (event.owner?.startsWith('site-')) {
+        this.particle(event.x, event.y ?? SITE.height, event.z, '#ffe0a3', false, 1);
+      }
       const tank = this.tankVisuals.get(event.owner ?? '');
       if (tank) {
         tank.barrel.position.z = event.charge === undefined ? 0.92 : 0.64;
@@ -672,7 +745,7 @@ export class BattleRenderer {
         this.pulse(event.x, event.z, 1.5 + event.charge * 2.5, !!waterAt(event, this.map));
         for (let i = 0; i < 6; i++) this.particle(event.x, event.y ?? groundHeight(event.x, event.z, this.map) + 0.5, event.z, '#efc58c', false, 0.8 + event.charge);
       }
-    } else if (event.kind === 'pickup') {
+    } else if (event.kind === 'pickup' || event.kind === 'capture') {
       for (let i = 0; i < 8; i++) this.particle(event.x, groundHeight(event.x, event.z, this.map) + 1, event.z, '#b5ddbc');
     }
   }
@@ -787,6 +860,7 @@ export class BattleRenderer {
     if (!menu) for (const event of state.events) if (event.id > this.seenEvent) this.handleEvent(event, local);
     if (state.events.length) this.seenEvent = state.events[state.events.length - 1].id;
     this.smokeClock += dt;
+    this.renderSites(state, menu ? undefined : local, dt);
     if (this.smokeClock > 0.18) {
       this.smokeClock = 0;
       for (const t of state.tanks) if (t.hp > 0 && t.hp / t.maxHp < 0.6 && (t.team === 'player' || state.visibleEnemies.includes(t.id))) {
@@ -888,7 +962,7 @@ export class BattleRenderer {
     this.shadowClock += dt;
     if (this.shadowClock > 0.5) {
       this.shadowClock = 0;
-      const list = [...this.obstacles.values(), ...[...this.tankVisuals.values()].map(v => v.root), ...[...this.camps.values()].map(c => c.root), ...this.clouds];
+      const list = [...this.obstacles.values(), ...[...this.siteVisuals.values()].map(v => v.root), ...[...this.tankVisuals.values()].map(v => v.root), ...[...this.camps.values()].map(c => c.root), ...this.clouds];
       this.shadows.getShadowMap()!.renderList = list.filter(r => r.isEnabled() && distance(r.position, this.camera.position) < (this.lowQuality ? 40 : 60)).flatMap(r => r.getChildMeshes());
     }
     this.scene.render();

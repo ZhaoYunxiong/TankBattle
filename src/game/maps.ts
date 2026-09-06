@@ -6,6 +6,8 @@ export interface Region extends Point { width: number; depth: number }
 
 export type River = Region & { kind: 'shallow' | 'deep' };
 
+export interface SitePosition extends Point { kind: 'tower' | 'supply'; team: 'player' | 'enemy' | 'neutral' }
+
 export interface MapDefinition {
   id: MapSize;
   name: string;
@@ -22,6 +24,7 @@ export interface MapDefinition {
   roads: Point[][];
   restBonus: number;
   vegetation: number;
+  sites: SitePosition[];
 }
 
 const small: MapDefinition = {
@@ -34,6 +37,10 @@ const small: MapDefinition = {
   grass: [{ x: -8, z: 30, width: 7, depth: 9 }, { x: 9, z: -18, width: 10, depth: 8 }, { x: -23, z: 10, width: 9, depth: 10 }, { x: 35, z: -14, width: 8, depth: 8 }],
   roads: [[{ x: 0, z: 44 }, { x: 0, z: -24 }, { x: 26, z: -34 }, { x: 26, z: -40 }], [{ x: -30, z: 40 }, { x: -30, z: -40 }], [{ x: 30, z: 40 }, { x: 30, z: 4 }], ...[-24, 0, 24].map(z => [{ x: -42, z }, { x: 42, z }])],
   restBonus: 0, vegetation: 170,
+  sites: [
+    { kind: 'tower', team: 'player', x: 7, z: 36 }, { kind: 'tower', team: 'enemy', x: 17, z: -35 },
+    { kind: 'tower', team: 'neutral', x: -24, z: 5 }, { kind: 'supply', team: 'neutral', x: -7, z: 20 },
+  ],
 };
 
 const medium: MapDefinition = {
@@ -46,6 +53,12 @@ const medium: MapDefinition = {
   grass: [{ x: -30, z: 51, width: 12, depth: 10 }, { x: 3, z: 24, width: 14, depth: 12 }, { x: 31, z: -36, width: 11, depth: 12 }, { x: -38, z: -64, width: 15, depth: 10 }, { x: 54, z: 14, width: 10, depth: 15 }],
   roads: [[{ x: -20, z: 68 }, { x: -20, z: -40 }, { x: 40, z: -51 }, { x: 40, z: -57 }], [{ x: -20, z: 25 }, { x: 44, z: 25 }, { x: 44, z: -40 }, { x: 40, z: -51 }], [{ x: -57, z: 0 }, { x: -57, z: -60 }, { x: -20, z: -40 }]],
   restBonus: 10, vegetation: 370,
+  sites: [
+    { kind: 'tower', team: 'player', x: -12, z: 62 }, { kind: 'tower', team: 'player', x: -27, z: 6 },
+    { kind: 'tower', team: 'enemy', x: 31, z: -53 }, { kind: 'tower', team: 'enemy', x: 51, z: -31 },
+    { kind: 'tower', team: 'neutral', x: 37, z: 5 }, { kind: 'tower', team: 'neutral', x: -49, z: -45 },
+    { kind: 'supply', team: 'neutral', x: -27, z: 29 }, { kind: 'supply', team: 'neutral', x: 37, z: -36 },
+  ],
 };
 
 const large: MapDefinition = {
@@ -58,6 +71,12 @@ const large: MapDefinition = {
   grass: [{ x: -51, z: 74, width: 13, depth: 13 }, { x: -22, z: 19, width: 14, depth: 15 }, { x: 35, z: 65, width: 13, depth: 13 }, { x: 53, z: -43, width: 14, depth: 13 }, { x: -57, z: -72, width: 16, depth: 15 }, { x: 72, z: 3, width: 12, depth: 16 }],
   roads: [[{ x: -40, z: 92 }, { x: -40, z: 54 }, { x: 40, z: 54 }, { x: 40, z: -54 }, { x: 60, z: -69 }, { x: 60, z: -75 }], [{ x: -40, z: 54 }, { x: -14, z: 20 }, { x: -14, z: -54 }, { x: 40, z: -54 }], [{ x: -78, z: -90 }, { x: -78, z: -30 }, { x: -14, z: 20 }]],
   restBonus: 20, vegetation: 640,
+  sites: [
+    { kind: 'tower', team: 'player', x: -32, z: 87 }, { kind: 'tower', team: 'player', x: -47, z: 62 }, { kind: 'tower', team: 'player', x: -22, z: 5 },
+    { kind: 'tower', team: 'enemy', x: 51, z: -70 }, { kind: 'tower', team: 'enemy', x: 47, z: -46 }, { kind: 'tower', team: 'enemy', x: 47, z: 20 },
+    { kind: 'tower', team: 'neutral', x: 31, z: 63 }, { kind: 'tower', team: 'neutral', x: 0, z: -63 }, { kind: 'tower', team: 'neutral', x: -68, z: -33 },
+    { kind: 'supply', team: 'neutral', x: -32, z: 63 }, { kind: 'supply', team: 'neutral', x: 33, z: -2 }, { kind: 'supply', team: 'neutral', x: -22, z: -43 },
+  ],
 };
 
 export const MAPS: Record<MapSize, MapDefinition> = { small, medium, large };

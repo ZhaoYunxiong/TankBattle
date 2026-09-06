@@ -1,4 +1,5 @@
 import type { Difficulty, Tank } from './types';
+import type { MapSize } from './maps';
 
 interface Balance {
   name: string;
@@ -39,10 +40,16 @@ export const DIFFICULTIES: Record<Difficulty, Balance> = {
 };
 
 // 合作主要增加部队数量，每辆敌军的血量与反应保持所选难度的标准。
-export const attackSize = (difficulty: Difficulty, players: number) => DIFFICULTIES[difficulty].attackers + Math.max(0, players - 1);
+export const MAP_PRESSURE = {
+  small: { attackers: 0, reserves: 0, speed: 1, reload: 1 },
+  medium: { attackers: 2, reserves: 10, speed: 1.12, reload: 0.94 },
+  large: { attackers: 4, reserves: 22, speed: 1.24, reload: 0.88 },
+};
 
-export const enemyLimit = (difficulty: Difficulty, players: number) => attackSize(difficulty, players) + 1;
+export const attackSize = (difficulty: Difficulty, players: number, size: MapSize = 'small') => DIFFICULTIES[difficulty].attackers + Math.max(0, players - 1) + MAP_PRESSURE[size].attackers;
 
-export const reserveSize = (difficulty: Difficulty, players: number) => DIFFICULTIES[difficulty].reserves + Math.max(0, players - 1) * 8;
+export const enemyLimit = (difficulty: Difficulty, players: number, size: MapSize = 'small') => attackSize(difficulty, players, size) + 1;
 
-export const waveSize = (difficulty: Difficulty, wave: number, players: number) => DIFFICULTIES[difficulty].firstWave + wave - 1 + Math.max(0, players - 1) * (2 + Math.floor(wave / 2));
+export const reserveSize = (difficulty: Difficulty, players: number, size: MapSize = 'small') => DIFFICULTIES[difficulty].reserves + Math.max(0, players - 1) * 8 + MAP_PRESSURE[size].reserves;
+
+export const waveSize = (difficulty: Difficulty, wave: number, players: number, size: MapSize = 'small') => DIFFICULTIES[difficulty].firstWave + wave - 1 + Math.max(0, players - 1) * (2 + Math.floor(wave / 2)) + MAP_PRESSURE[size].attackers;

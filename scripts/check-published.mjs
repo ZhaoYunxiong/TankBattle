@@ -18,6 +18,7 @@ try {
   await page.locator('#soloButton').waitFor({ state: 'visible' });
   assert.equal(await page.locator('#modeClassic').getAttribute('aria-pressed'), 'true');
   assert.equal(await page.locator('#difficulty').inputValue(), 'normal');
+  assert.equal(await page.locator('#shake').inputValue(), '1.4');
   await page.screenshot({ path: 'artifacts/published-menu.png' });
   await page.locator('#careerButton').tap();
   await page.locator('#careerDialog').waitFor({ state: 'visible' });
@@ -35,6 +36,11 @@ try {
   assert.equal(await page.locator('#enemyBaseCard').isVisible(), false);
   assert.equal(await page.locator('.player-card').count(), 0);
   assert.equal(await page.locator('#localTankStatus').isVisible(), true);
+  // 出生点的友塔位于侧面，横屏确认模型上方标签，随后恢复竖屏检查操作。
+  await page.setViewportSize({ width: 844, height: 390 });
+  await page.locator('.site-label[data-team=player]').first().waitFor({ state: 'visible' });
+  await page.screenshot({ path: 'artifacts/published-towers.png' });
+  await page.setViewportSize({ width: 390, height: 844 });
   assert.equal(await page.locator('#score').isVisible(), false);
   const cdp = await context.newCDPSession(page);
   assert.equal(await pinchCameraControls(page, cdp), 1);
@@ -106,7 +112,7 @@ try {
   assert.equal(await guest.locator('#difficultyBadge').textContent(), '休闲');
   await guest.screenshot({ path: 'artifacts/published-multiplayer.png' });
   assert.deepEqual(errors, []);
-  console.log(JSON.stringify({ url, http: response.status(), singlePlayer: 'passed', boostAndCharge: 'passed', touchCancel: 'passed', transparentHud: 'passed', modes: ['classic', 'defense'], careerAndFactory: 'passed', tacticalMap: 'passed', pageZoomGuard: 'passed', difficultySync: 'passed', largeMapSync: 'passed', scoutingHud: 'passed', pickupFeedback: 'passed', mobileLayout: 'passed', publicWebRTC: 'passed', pageErrors: errors }));
+  console.log(JSON.stringify({ url, http: response.status(), singlePlayer: 'passed', boostAndCharge: 'passed', towerHud: 'passed', defaultStrongShake: 'passed', touchCancel: 'passed', transparentHud: 'passed', modes: ['classic', 'defense'], careerAndFactory: 'passed', tacticalMap: 'passed', pageZoomGuard: 'passed', difficultySync: 'passed', largeMapSync: 'passed', scoutingHud: 'passed', pickupFeedback: 'passed', mobileLayout: 'passed', publicWebRTC: 'passed', pageErrors: errors }));
 } finally {
   await browser.close();
 }

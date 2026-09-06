@@ -8,7 +8,7 @@ export const SHOT_HEIGHT = 1.13;
 
 export const SHOT_RANGE = 54;
 
-export type ShotTarget = { type: 'obstacle' | 'tank' | 'base'; id: string | number };
+export type ShotTarget = { type: 'obstacle' | 'tank' | 'base' | 'tower'; id: string | number };
 
 export function shotSlope(state: State, tank: Tank, angle = tank.turret) {
   const sx = Math.sin(angle);
@@ -25,6 +25,7 @@ export function shotSlope(state: State, tank: Tank, angle = tank.turret) {
   // 只辅助炮管仰角，水平方向仍由玩家瞄准；被山坡遮挡的目标仍会被地形拦住。
   for (const t of state.tanks) if (t.hp > 0 && t.connected && t.team !== tank.team && !concealed(t, state) && (tank.team === 'enemy' || state.visibleEnemies.includes(t.id))) consider(t.x, t.z, 0.95, 1);
   for (const o of state.obstacles) if (o.hp > 0) consider(o.x, o.z, o.radius, Math.min(1.1, o.height * 0.6));
+  for (const site of state.sites) if (site.kind === 'tower' && site.hp > 0 && site.team !== tank.team) consider(site.x, site.z, site.radius, 2);
   const base = tank.team === 'enemy' ? mapFor(state.mapSize).base : state.mode === 'classic' && state.enemyBaseDiscovered ? mapFor(state.mapSize).enemyBase : null;
   if (base) consider(base.x, base.z, base.radius, 1.1);
   return clamp(result, -0.65, 0.65);
@@ -58,7 +59,7 @@ function segmentCylinder(a: Point3, b: Point3, x: number, z: number, radius: num
   return enter <= leave ? enter : null;
 }
 
-export function traceShot(state: State, team: Tank['team'], a: Point3, b: Point3): { at: number; target: ShotTarget | null } | null {
+export function traceShot(state: State, team: Tank['team'], a: Point3, b: Point3, ignoredSite?: number): { at: number; target: ShotTarget | null } | null {
   const ground = terrainIntersection(a, b, 0.08, mapFor(state.mapSize));
   let at = ground ?? Infinity;
   let target: ShotTarget | null = null;
@@ -69,6 +70,7 @@ export function traceShot(state: State, team: Tank['team'], a: Point3, b: Point3
   };
   for (const o of state.obstacles) if (o.hp > 0) check(o.x, o.z, o.radius, o.height, { type: 'obstacle', id: o.id });
   for (const t of state.tanks) if (t.hp > 0 && t.connected && t.team !== team) check(t.x, t.z, 0.95, 1.65, { type: 'tank', id: t.id });
+  for (const site of state.sites) if (site.id !== ignoredSite && site.kind === 'tower' && site.hp > 0 && site.team !== team) check(site.x, site.z, site.radius, 3.8, { type: 'tower', id: site.id });
   if (team === 'enemy' && state.baseHp > 0) check(mapFor(state.mapSize).base.x, mapFor(state.mapSize).base.z, mapFor(state.mapSize).base.radius, 2.9, { type: 'base', id: 'player' });
   if (team === 'player' && state.mode === 'classic' && state.enemyBaseHp > 0) check(mapFor(state.mapSize).enemyBase.x, mapFor(state.mapSize).enemyBase.z, mapFor(state.mapSize).enemyBase.radius, 2.9, { type: 'base', id: 'enemy' });
   return at === Infinity ? null : { at, target };

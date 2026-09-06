@@ -53,7 +53,7 @@ export interface Tank {
   connected: boolean;
   ready: boolean;
   upgrades: Loadout;
-  stats: { kills: number; assists: number; defenses: number; baseDamage: number; teamBonus: number };
+  stats: { kills: number; assists: number; defenses: number; baseDamage: number; teamBonus: number; objectives: number };
 }
 
 export interface Obstacle {
@@ -75,6 +75,7 @@ export interface Obstacle {
 
 export interface Shell {
   id: number;
+  site?: number;
   owner: string;
   team: Tank['team'];
   x: number;
@@ -96,9 +97,31 @@ export interface Drop {
   life: number;
 }
 
+export type SiteTeam = Tank['team'] | 'neutral';
+
+export interface Site {
+  id: number;
+  kind: 'tower' | 'supply';
+  x: number;
+  z: number;
+  team: SiteTeam;
+  capturable: boolean;
+  hp: number;
+  maxHp: number;
+  radius: number;
+  capture: number;
+  captureTeam: SiteTeam;
+  contested: boolean;
+  rewarded: boolean;
+  cooldown: number;
+  angle: number;
+  warning: number;
+  target: string | null;
+}
+
 export interface BattleEvent {
   id: number;
-  kind: 'shot' | 'hit' | 'destroy' | 'pickup' | 'wave';
+  kind: 'shot' | 'hit' | 'destroy' | 'pickup' | 'wave' | 'capture';
   x: number;
   y?: number;
   z: number;
@@ -107,7 +130,8 @@ export interface BattleEvent {
   power?: Power;
   obstacle?: number;
   material?: Obstacle['kind'];
-  target?: 'tank' | 'base';
+  target?: 'tank' | 'base' | 'tower' | 'supply';
+  team?: SiteTeam;
   sourceX?: number;
   sourceZ?: number;
   charge?: number;
@@ -117,7 +141,7 @@ export interface Scar { id: number; x: number; z: number; radius: number; kind: 
 
 export interface Ping { owner: string; x: number; z: number; until: number }
 
-export const PROTOCOL_VERSION = 9;
+export const PROTOCOL_VERSION = 10;
 
 export interface State {
   version: typeof PROTOCOL_VERSION;
@@ -141,6 +165,7 @@ export interface State {
   enemyBaseHp: number;
   enemyBaseMaxHp: number;
   tanks: Tank[];
+  sites: Site[];
   obstacles: Obstacle[];
   shells: Shell[];
   drops: Drop[];

@@ -3,12 +3,14 @@ import { COVER_REDUCTION, terrainCover } from './cover';
 import { BOOST, CHARGE, chargeDamage, chargePower } from './abilities';
 import { cleanLoadout, emptyLoadout } from './factory';
 import { uniqueId } from '../id';
-import { concealed, updateVisibility } from './visibility';
-import { angleDiff, clamp, cleanInput, damageHandling, distance, EMPTY_INPUT, PROTOCOL_VERSION, rapidDuration, WAVES, type BattleEvent, type Difficulty, type GameMode, type Input, type Power, type Scar, type Shell, type State, type Tank } from './types';
-import { blocked, createMap, findPath, seededRandom, segmentCircle } from './world';
+import { concealed, sightClear, updateVisibility } from './visibility';
+import { angleDiff, clamp, cleanInput, damageHandling, distance, EMPTY_INPUT, PROTOCOL_VERSION, rapidDuration, WAVES, type BattleEvent, type Difficulty, type GameMode, type Input, type Power, type Scar, type Shell, type Site, type State, type Tank } from './types';
+import { blocked, createMap, findPath, seededRandom, segmentCircle, type Solid } from './world';
 import { groundHeight, slopeSpeed, terrainIntersection } from './terrain';
-import { SHOT_HEIGHT, shotSlope, traceShot } from './combat';
-import { attackSize, DIFFICULTIES, enemyLimit, reserveSize, waveSize } from './balance';
+import { SHOT_HEIGHT, shotSlope, traceShot, type ShotTarget } from './combat';
+import { attackSize, DIFFICULTIES, enemyLimit, MAP_PRESSURE, reserveSize, waveSize } from './balance';
+
+import { advanceCapture, createSites, SITE } from './sites';
 
 interface EnemyMemory {
   lastSeen?: { x: number; z: number };
@@ -23,6 +25,18 @@ export class Simulation {
   state: State;
 
   private random: () => number;
+
+  private navigation?: { obstacles: State['obstacles']; sites: Site[]; count: number; solids: Solid[] };
+
+  private towerShots = new Map<number, { at: number; angle: number; slope: number; target: string }>();
+
+  private get solids() {
+    const { obstacles, sites } = this.state;
+    if (this.navigation?.obstacles !== obstacles || this.navigation.sites !== sites || this.navigation.count !== obstacles.length + sites.length) {
+      this.navigation = { obstacles, sites, count: obstacles.length + sites.length, solids: [...obstacles, ...sites.filter(s => s.kind === 'tower')] };
+    }
+    return this.navigation.solids;
+  }
 
   private nextId = 1000;
 
@@ -52,6 +66,8 @@ export class Simulation {
 
   private batchActive = false;
 
+  private batchAt = 0;
+
   private enemyKills = 0;
 
   private memories = new Map<string, EnemyMemory>();
@@ -72,7 +88,7 @@ export class Simulation {
       version: PROTOCOL_VERSION, matchId: uniqueId(), seed, mode, difficulty, mapSize, enemyBaseDiscovered: false, visibleEnemies: [], explored: [], time: 0, phase: 'lobby', paused: false, wave: 0,
       countdown: 3, remaining: 0, reinforcementCountdown: 0, baseHp: 600, baseMaxHp: 600,
       enemyBaseHp: mode === 'classic' ? DIFFICULTIES[difficulty].baseHp : 0, enemyBaseMaxHp: mode === 'classic' ? DIFFICULTIES[difficulty].baseHp : 0,
-      tanks: [], obstacles: createMap(seed, mode, mapFor(mapSize)), shells: [], drops: [], events: [], scars: [], pings: [], campUpgrades: { baseArmor: 0, repair: 0 },
+      tanks: [], sites: createSites(mapSize, mode, difficulty), obstacles: createMap(seed, mode, mapFor(mapSize)), shells: [], drops: [], events: [], scars: [], pings: [], campUpgrades: { baseArmor: 0, repair: 0 },
     };
   }
 
@@ -138,10 +154,10 @@ export class Simulation {
     if (this.state.phase !== 'lobby') return;
     this.state.phase = 'intermission';
     this.state.countdown = 3;
-    if (this.state.mode === 'classic') this.state.remaining = reserveSize(this.state.difficulty, this.playerCount);
+    if (this.state.mode === 'classic') this.state.remaining = reserveSize(this.state.difficulty, this.playerCount, this.state.mapSize);
     this.addDrop('heal', this.map.spawn.x - 3, this.map.spawn.z - 3);
     this.addDrop('rapid', this.map.spawn.x + 3, this.map.spawn.z - 5);
-    // 沿主要路线设置少量补给停靠点，大地图赶路有收获，但不增加敌军总量。
+    // 沿主要路线保留开局补给，固定补给点另行提供占领与定时维修。
     for (const [i, p] of this.map.roads[0].slice(1, -1).entries()) this.addDrop(i % 2 ? 'armor' : 'burst', p.x - 2, p.z + 3);
     updateVisibility(this.state);
   }
@@ -152,7 +168,7 @@ export class Simulation {
       id, name, team, kind, color: 0, x: 0, z: 0, angle: 0, turret: 0, hp, maxHp: hp,
       cooldown: 0, stamina: BOOST.capacity, boosting: false, boostLocked: false, charging: false, charge: 0, recoil: 0,
       warning: 0, exposedUntil: 0, lives: 2, respawn: 0, shield: 0, buffs: { rapid: 0, burst: 0, heal: 0, armor: 0 },
-      score: 0, connected: true, ready: true, upgrades: emptyLoadout(), stats: { kills: 0, assists: 0, defenses: 0, baseDamage: 0, teamBonus: 0 },
+      score: 0, connected: true, ready: true, upgrades: emptyLoadout(), stats: { kills: 0, assists: 0, defenses: 0, baseDamage: 0, teamBonus: 0, objectives: 0 },
     };
   }
 
@@ -163,17 +179,17 @@ export class Simulation {
 
   private addDrop(kind: Power, x: number, z: number) {
     // 补给只放在坦克可到达的位置，避免卡在岩石或营地核心里。
-    if (blocked(x, z, this.state.obstacles, 0.9, this.state.mode, this.map)) {
+    if (blocked(x, z, this.solids, 0.9, this.state.mode, this.map)) {
       for (let i = 0; i < 24; i++) {
         const nx = x + Math.cos(i * 2.4) * (2 + i * 0.35);
         const nz = z + Math.sin(i * 2.4) * (2 + i * 0.35);
-        if (!blocked(nx, nz, this.state.obstacles, 0.9, this.state.mode, this.map)) { x = nx; z = nz; break; }
+        if (!blocked(nx, nz, this.solids, 0.9, this.state.mode, this.map)) { x = nx; z = nz; break; }
       }
     }
     const source = this.state.tanks.find(t => t.team === 'player' && t.hp > 0 && t.connected) ?? this.map.spawn;
-    const path = findPath(source, { x, z }, this.state.obstacles, this.state.mode, this.map, true);
+    const path = findPath(source, { x, z }, this.solids, this.state.mode, this.map, true);
     const reachable = distance(source, { x, z }) < 2 || path.length > 0 && distance(path.at(-1)!, { x, z }) < 1.6;
-    if (reachable && !blocked(x, z, this.state.obstacles, 0.9, this.state.mode, this.map)) {
+    if (reachable && !blocked(x, z, this.solids, 0.9, this.state.mode, this.map)) {
       this.state.drops.push({ id: this.nextId++, kind, x, z, life: rapidDuration(this.state.mapSize) * 2 });
     }
   }
@@ -183,8 +199,10 @@ export class Simulation {
   }
 
   private beginBatch() {
-    this.attackersToSpawn = Math.min(attackSize(this.state.difficulty, this.playerCount), this.state.remaining);
+    const active = this.state.tanks.filter(t => t.team === 'enemy' && t.hp > 0 && !this.guardPosts.has(t.id)).length;
+    this.attackersToSpawn = Math.min(Math.max(0, attackSize(this.state.difficulty, this.playerCount, this.state.mapSize) - active), this.state.remaining);
     this.batchActive = true;
+    this.batchAt = this.state.time;
   }
 
   private spawnEnemy() {
@@ -196,7 +214,7 @@ export class Simulation {
       x: this.map.enemySpawn.x + lanes[(first + i) % lanes.length],
       z: this.map.enemySpawn.z + offset,
     })));
-    const spawn = candidates.find(p => !blocked(p.x, p.z, s.obstacles, 1, s.mode, this.map) &&
+    const spawn = candidates.find(p => !blocked(p.x, p.z, this.solids, 1, s.mode, this.map) &&
       !s.tanks.some(t => t.hp > 0 && t.connected && distance(t, p) < 2.2));
     if (!spawn) { this.spawnAt = s.time + 1; return; }
     const kind = (classic || s.wave >= 2) && this.random() < 0.25 ? 'heavy' : this.random() < 0.35 ? 'scout' : 'standard';
@@ -210,7 +228,7 @@ export class Simulation {
     else if (classic) this.attackersToSpawn--;
     s.remaining--;
     this.attackersToSpawn = Math.min(this.attackersToSpawn, s.remaining);
-    this.spawnAt = s.time + (classic ? 4 : Math.max(2.5, 5 - s.wave * 0.3));
+    this.spawnAt = s.time + (classic ? 4 * MAP_PRESSURE[s.mapSize].reload : Math.max(2.2, 5 - s.wave * 0.3) * MAP_PRESSURE[s.mapSize].reload);
   }
 
   step(dt: number) {
@@ -226,7 +244,7 @@ export class Simulation {
       if (s.countdown <= 0) {
         s.wave++;
         s.phase = 'battle';
-        if (s.mode === 'defense') s.remaining = waveSize(s.difficulty, s.wave, this.playerCount);
+        if (s.mode === 'defense') s.remaining = waveSize(s.difficulty, s.wave, this.playerCount, s.mapSize);
         else this.beginBatch();
         this.spawnAt = s.time + 1;
         this.event('wave', 0, -this.map.arena.z + 12, s.wave);
@@ -235,15 +253,20 @@ export class Simulation {
     if (s.mode === 'classic' && s.phase === 'battle' && s.enemyBaseHp > 0) {
       if (this.batchActive && this.attackersToSpawn === 0 && !s.tanks.some(t => t.team === 'enemy' && t.hp > 0 && !this.guardPosts.has(t.id))) {
         this.batchActive = false;
-        s.reinforcementCountdown = s.remaining > 0 ? DIFFICULTIES[s.difficulty].raidRest + this.map.restBonus : 0;
+        s.reinforcementCountdown = s.remaining > 0 ? DIFFICULTIES[s.difficulty].raidRest + this.map.restBonus / 4 : 0;
       } else if (s.reinforcementCountdown > 0) {
         s.reinforcementCountdown = Math.max(0, s.reinforcementCountdown - dt);
         if (s.reinforcementCountdown === 0) this.beginBatch();
+      } else if (s.mapSize !== 'small' && this.batchActive && this.attackersToSpawn === 0 && s.remaining > 0 && s.time - this.batchAt >= 60 &&
+        s.tanks.filter(t => t.team === 'enemy' && t.hp > 0).length < enemyLimit(s.difficulty, this.playerCount, s.mapSize)) {
+        // 大地图的远处残兵不再无限拖住增援；只补现有缺额，清场休整优先且总兵力有限。
+        this.beginBatch();
       }
     }
     const reinforcements = s.remaining > 0 && (s.mode === 'defense' || s.enemyBaseHp > 0 && this.batchActive && this.attackersToSpawn > 0);
-    if (s.phase === 'battle' && reinforcements && s.time >= this.spawnAt && s.tanks.filter(t => t.team === 'enemy' && t.hp > 0).length < enemyLimit(s.difficulty, this.playerCount)) this.spawnEnemy();
+    if (s.phase === 'battle' && reinforcements && s.time >= this.spawnAt && s.tanks.filter(t => t.team === 'enemy' && t.hp > 0).length < enemyLimit(s.difficulty, this.playerCount, s.mapSize)) this.spawnEnemy();
     this.focus.clear();
+    this.advanceSites(dt);
     for (const t of s.tanks) {
       if (!t.connected) continue;
       t.cooldown = Math.max(0, t.cooldown - dt);
@@ -277,7 +300,7 @@ export class Simulation {
         }
       } else input = this.enemyInput(t, dt);
       t.turret += clamp(angleDiff(input.aim, t.turret), -dt * 3.4, dt * 3.4);
-      const speed = (t.team === 'player' ? 6 * (1 + t.upgrades.mobility * 0.04) : t.kind === 'scout' ? 4.4 : t.kind === 'heavy' ? 2.5 : 3.3) * damageHandling(t.hp, t.maxHp).speed;
+      const speed = (t.team === 'player' ? 6 * (1 + t.upgrades.mobility * 0.04) : (t.kind === 'scout' ? 4.4 : t.kind === 'heavy' ? 2.5 : 3.3) * MAP_PRESSURE[s.mapSize].speed) * damageHandling(t.hp, t.maxHp).speed;
       const slope = slopeSpeed(t.x, t.z, input.moveX, input.moveZ, this.map);
       if (!input.boost) t.boostLocked = false;
       const boost = t.team === 'player' && input.boost && !t.boostLocked && t.stamina > 0 && (t.boosting || t.stamina >= BOOST.restart);
@@ -309,7 +332,7 @@ export class Simulation {
           const burst = t.buffs.burst > 0;
           this.fire(t, burst ? 12 : t.team === 'player' ? 20 : 14);
           const balance = DIFFICULTIES[s.difficulty];
-          t.cooldown = t.team === 'player' ? (t.buffs.rapid > 0 ? 0.7 : 1) * (1 - t.upgrades.reload * 0.04) : t.kind === 'heavy' ? balance.heavyCooldown : balance.cooldown;
+          t.cooldown = t.team === 'player' ? (t.buffs.rapid > 0 ? 0.7 : 1) * (1 - t.upgrades.reload * 0.04) : (t.kind === 'heavy' ? balance.heavyCooldown : balance.cooldown) * MAP_PRESSURE[s.mapSize].reload;
           t.warning = 0;
           const memory = this.memories.get(t.id);
           if (memory) memory.shotAt = undefined;
@@ -359,7 +382,7 @@ export class Simulation {
       if (s.wave === WAVES) s.phase = 'won';
       else {
         s.phase = 'intermission';
-        s.countdown = DIFFICULTIES[s.difficulty].waveRest + this.map.restBonus / 2;
+        s.countdown = DIFFICULTIES[s.difficulty].waveRest + this.map.restBonus / 4;
         s.baseHp = Math.min(s.baseMaxHp, s.baseHp + 45);
         this.addDrop('heal', this.map.spawn.x - 3, this.map.spawn.z - 2);
         for (const o of s.obstacles) if (o.kind === 'wall' && o.team === 'player' && o.hp > 0) o.hp = Math.min(o.maxHp, o.hp + 20);
@@ -382,6 +405,66 @@ export class Simulation {
     }
   }
 
+  private advanceSites(dt: number) {
+    const s = this.state;
+    for (const site of s.sites) {
+      if (site.hp <= 0) continue;
+      site.cooldown = Math.max(0, site.cooldown - dt);
+      const captured = advanceCapture(site, s, dt);
+      if (captured) {
+        this.towerShots.delete(site.id);
+        this.contributions.delete('site-' + site.id);
+        this.event('capture', site.x, site.z, 1, captured[0].id);
+        Object.assign(s.events.at(-1)!, { target: site.kind, team: site.team });
+        if (site.team === 'player' && !site.rewarded) {
+          site.rewarded = true;
+          for (const t of captured) { t.score += 100; t.stats.objectives++; }
+        }
+      }
+      if (site.kind === 'supply') {
+        const allies = s.tanks.filter(t => t.team === site.team && t.connected && t.hp > 0 && t.hp < t.maxHp &&
+          distance(t, site) <= SITE.captureRadius && sightClear(s, site, t));
+        if (site.cooldown <= 0 && !site.contested && allies.length) {
+          for (const t of allies) {
+            t.hp = Math.min(t.maxHp, t.hp + t.maxHp * 0.35);
+            this.event('pickup', site.x, site.z, 1, t.id, 'heal');
+          }
+          site.cooldown = SITE.repairCooldown;
+        }
+        continue;
+      }
+      if (site.team === 'neutral' || s.phase !== 'battle') { site.warning = 0; site.target = null; this.towerShots.delete(site.id); continue; }
+      const source = { x: site.x, y: groundHeight(site.x, site.z, this.map) + SITE.height, z: site.z };
+      const targets = s.tanks.filter(t => t.hp > 0 && t.connected && t.team !== site.team && distance(site, t) < SITE.range && !concealed(t, s))
+        .sort((a, b) => Number(b.id === site.target) - Number(a.id === site.target) || distance(site, a) - distance(site, b));
+      const target = targets.find(t => {
+        if (site.team === 'enemy' && (this.focus.get(t.id) ?? 0) >= DIFFICULTIES[s.difficulty].focusLimit) return false;
+        const hit = traceShot(s, site.team as Tank['team'], source, { x: t.x, y: groundHeight(t.x, t.z, this.map) + 1, z: t.z }, site.id);
+        return hit?.target?.type === 'tank' && hit.target.id === t.id;
+      });
+      if (!target) { site.target = null; site.warning = 0; this.towerShots.delete(site.id); continue; }
+      if (site.team === 'enemy') this.focus.set(target.id, (this.focus.get(target.id) ?? 0) + 1);
+      if (site.target !== target.id) this.towerShots.delete(site.id);
+      site.target = target.id;
+      let shot = this.towerShots.get(site.id);
+      const aim = shot?.angle ?? Math.atan2(target.x - site.x, target.z - site.z);
+      site.angle += clamp(angleDiff(aim, site.angle), -dt * 2, dt * 2);
+      if (!shot && site.cooldown <= 0 && Math.abs(angleDiff(site.angle, aim)) < 0.08) {
+        shot = { at: s.time + SITE.warning, angle: aim, slope: (groundHeight(target.x, target.z, this.map) + 1 - source.y) / distance(site, target), target: target.id };
+        this.towerShots.set(site.id, shot);
+      }
+      site.warning = shot ? clamp(1 - (shot.at - s.time) / SITE.warning, 0.05, 1) : 0;
+      if (shot && s.time >= shot.at) {
+        // 预警时锁定方向；发射后不追踪玩家，炮弹和坦克炮弹共用碰撞与掩护减伤。
+        s.shells.push({ id: this.nextId++, site: site.id, owner: 'site-' + site.id, team: site.team,
+          ...source, vx: Math.sin(shot.angle) * 24, vy: shot.slope * 24, vz: Math.cos(shot.angle) * 24,
+          damage: site.team === 'player' ? 20 : { casual: 14, normal: 16, challenge: 18 }[s.difficulty], life: 1.4 });
+        this.event('shot', site.x, site.z, 0.8, 'site-' + site.id, undefined, source.y);
+        site.cooldown = SITE.reload; site.warning = 0; this.towerShots.delete(site.id);
+      }
+    }
+  }
+
   private scar(x: number, z: number, radius: number, kind: Scar['kind'], stone = false) {
     if (Math.abs(x) > this.map.arena.x || Math.abs(z) > this.map.arena.z || waterAt({ x, z }, this.map)) return;
     const surface: Scar['surface'] = this.map.bridges.some(b => inRegion({ x, z }, b)) ? 'bridge' : stone || groundHeight(x, z, this.map) > 7 && roadDistance({ x, z }, this.map) > 3 ? 'stone' : 'earth';
@@ -391,7 +474,7 @@ export class Simulation {
   }
 
   private move(t: Tank, dx: number, dz: number) {
-    const free = (x: number, z: number) => !blocked(x, z, this.state.obstacles, 0.85, this.state.mode, this.map) && !this.state.tanks.some(other =>
+    const free = (x: number, z: number) => !blocked(x, z, this.solids, 0.85, this.state.mode, this.map) && !this.state.tanks.some(other =>
       other.id !== t.id && other.connected && other.hp > 0 && Math.hypot(x - other.x, z - other.z) < 1.5);
     if (free(t.x + dx, t.z)) t.x += dx;
     if (free(t.x, t.z + dz)) t.z += dz;
@@ -418,13 +501,17 @@ export class Simulation {
     }
     // 掩体后只保留最后目击位置；不再读取隐藏玩家的当前位置。
     const searching = !nearby && memory.lastSeen && s.time < memory.searchUntil;
-    const target = nearby ?? (searching ? memory.lastSeen! : post ?? this.map.base);
+    // 部分进攻坦克绕路夺取中立据点，其他部队继续推进；不会读取草丛内玩家位置。
+    const strategic = !post ? s.sites.filter(site => site.hp > 0 && site.team !== 'enemy' &&
+      (site.kind === 'tower' && site.team === 'player' && distance(t, site) < 28 || site.capturable && Number(t.id.replace(/\D/g, '')) % 3 === 0 && distance(t, site) < 80))
+      .sort((a, b) => distance(t, a) - distance(t, b))[0] : undefined;
+    const target = nearby ?? (searching ? memory.lastSeen! : post ?? strategic ?? this.map.base);
     const returning = !!post && !nearby && !searching;
     const obstruction = s.obstacles.filter(o => o.hp > 0 && segmentCircle(t.x, t.z, target.x, target.z, o.x, o.z, o.radius + 0.1) !== null)
       .sort((a, b) => distance(a, t) - distance(b, t))[0];
     let path = this.paths.get(t.id);
     if (!path || s.time >= path.at) {
-      path = { points: findPath(t, target, s.obstacles, s.mode, this.map), at: s.time + 1.3 + this.random() * 0.4 };
+      path = { points: findPath(t, target, this.solids, s.mode, this.map), at: s.time + 1.3 + this.random() * 0.4 };
       this.paths.set(t.id, path);
     }
     while (path.points.length > 1 && distance(t, path.points[0]) < 1.1) path.points.shift();
@@ -435,14 +522,15 @@ export class Simulation {
     const hiddenByGround = !returning && distance(t, firingAt) < 23 && terrainIntersection(
       { x: t.x, y: groundHeight(t.x, t.z, this.map) + SHOT_HEIGHT, z: t.z },
       { x: firingAt.x, y: groundHeight(firingAt.x, firingAt.z, this.map) + 1, z: firingAt.z }, 0.08, this.map) !== null;
-    const throttle = distance(t, target) > (returning ? 1.5 : hiddenByGround || searching ? 2.8 : 9) || (!returning && obstruction) ? Math.abs(turn) < 1.2 ? 1 : 0.15 : 0;
+    const throttle = distance(t, target) > (returning ? 1.5 : hiddenByGround || searching || strategic?.capturable && target === strategic ? 3.2 : 9) || (!returning && obstruction) ? Math.abs(turn) < 1.2 ? 1 : 0.15 : 0;
     t.angle += clamp(turn * 2, -1, 1) * dt * (t.kind === 'heavy' ? 1.3 : 1.9);
     const lineHit = traceShot(s, t.team,
       { x: t.x, y: groundHeight(t.x, t.z, this.map) + SHOT_HEIGHT, z: t.z },
       { x: firingAt.x, y: groundHeight(firingAt.x, firingAt.z, this.map) + 1, z: firingAt.z });
     const unassignedPlayer = lineHit?.target?.type === 'tank' && lineHit.target.id !== nearby?.id;
-    const canFire = !unassignedPlayer && s.phase === 'battle' && !returning && !searching && !hiddenByGround && distance(t, firingAt) < 23;
-    const aimTarget = nearby ? nearby.id : obstruction ? 'obstacle-' + obstruction.id : 'base';
+    const capturing = target === strategic && strategic?.capturable && distance(t, strategic) <= SITE.captureRadius;
+    const canFire = !capturing && !(target === strategic && strategic?.team === 'neutral' && !obstruction) && !unassignedPlayer && s.phase === 'battle' && !returning && !searching && !hiddenByGround && distance(t, firingAt) < 23;
+    const aimTarget = nearby ? nearby.id : obstruction ? 'obstacle-' + obstruction.id : strategic ? 'site-' + strategic.id : 'base';
     if (!canFire) {
       memory.aimTarget = undefined;
       memory.shotAt = undefined;
@@ -482,7 +570,7 @@ export class Simulation {
       const x = recipient.x + Math.sin(angle) * 2.8;
       const z = recipient.z + Math.cos(angle) * 2.8;
       if (Array.from({ length: 8 }, (_, j) => (j + 1) / 8).every(at =>
-        !blocked(recipient.x + (x - recipient.x) * at, recipient.z + (z - recipient.z) * at, this.state.obstacles, 0.85, this.state.mode, this.map))) {
+        !blocked(recipient.x + (x - recipient.x) * at, recipient.z + (z - recipient.z) * at, this.solids, 0.85, this.state.mode, this.map))) {
         this.state.drops.push({ id: this.nextId++, kind: 'heal', x, z, life: 60 });
         return;
       }
@@ -514,7 +602,7 @@ export class Simulation {
     for (const shell of this.state.shells) {
       shell.life -= dt;
       const next = { x: shell.x + shell.vx * dt, y: shell.y + shell.vy * dt, z: shell.z + shell.vz * dt };
-      const collision = traceShot(this.state, shell.team, shell, next);
+      const collision = traceShot(this.state, shell.team, shell, next, shell.site);
       const at = collision?.at ?? 1;
       shell.x += (next.x - shell.x) * at;
       shell.y += (next.y - shell.y) * at;
@@ -533,12 +621,34 @@ export class Simulation {
     this.state.shells = this.state.shells.filter(s => s.life > 0);
   }
 
-  private hit(shell: Shell, target: { type: 'obstacle' | 'tank' | 'base'; id: string | number }) {
+  private hit(shell: Shell, target: ShotTarget) {
     this.event('hit', shell.x, shell.z, 0.7, shell.owner, undefined, shell.y);
     if (shell.power !== undefined) Object.assign(this.state.events.at(-1)!, { charge: shell.power });
     const shooter = this.state.tanks.find(t => t.id === shell.owner);
     if (shooter) Object.assign(this.state.events.at(-1)!, { sourceX: shooter.x, sourceZ: shooter.z });
-    if (target.type === 'base') {
+    const sourceSite = this.state.sites.find(s => s.id === shell.site);
+    if (sourceSite) Object.assign(this.state.events.at(-1)!, { sourceX: sourceSite.x, sourceZ: sourceSite.z });
+    if (target.type === 'tower') {
+      const site = this.state.sites.find(s => s.id === target.id)!;
+      if (site.hp <= 0 || site.team === shell.team) return;
+      site.hp = Math.max(0, site.hp - shell.damage);
+      const key = 'site-' + site.id;
+      if (shooter?.team === 'player' && site.team === 'enemy') {
+        if (!this.contributions.has(key)) this.contributions.set(key, new Map());
+        this.contributions.get(key)!.set(shooter.id, this.state.time);
+      }
+      if (site.hp === 0) {
+        site.capture = 0; site.warning = 0; site.target = null; site.contested = false; this.towerShots.delete(site.id);
+        this.event('destroy', site.x, site.z, 3);
+        Object.assign(this.state.events.at(-1)!, { target: 'tower' }); this.scar(site.x, site.z, 3.1, 'crater');
+        for (const [id, at] of site.team === 'enemy' && shell.team === 'player' ? this.contributions.get(key) ?? [] : []) {
+          const ally = this.state.tanks.find(t => t.id === id);
+          if (!ally || this.state.time - at > 20) continue;
+          ally.score += ally === shooter ? 240 : 120; ally.stats.objectives++;
+        }
+        this.contributions.delete(key);
+      }
+    } else if (target.type === 'base') {
       const enemy = target.id === 'enemy';
       const key = enemy ? 'enemyBaseHp' : 'baseHp';
       if (this.state[key] <= 0) return;
@@ -585,6 +695,9 @@ export class Simulation {
         if (t.team === 'enemy') {
           const points = t.kind === 'heavy' ? 300 : t.kind === 'scout' ? 120 : 180;
           if (killer?.team === 'player') { killer.score += points; killer.stats.kills++; }
+          else if (sourceSite?.team === 'player') for (const ally of this.state.tanks) if (ally.team === 'player' && ally.connected) {
+            ally.score += 30; ally.stats.defenses++;
+          }
           for (const [id, at] of this.contributions.get(t.id) ?? []) {
             const ally = this.state.tanks.find(p => p.id === id);
             if (!ally || this.state.time - at > 20) continue;
