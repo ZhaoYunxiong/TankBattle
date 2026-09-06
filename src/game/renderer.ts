@@ -24,7 +24,7 @@ import { CAMERA } from './camera';
 import { groundHeight, groundSlope, terrainVertex, terrainIntersection, TERRAIN_STEP } from './terrain';
 import { SHOT_HEIGHT, shotSlope, traceShot } from './combat';
 
-type TankVisual = { root: TransformNode; chassis: TransformNode; gun: TransformNode; turret: TransformNode; barrel: Mesh; body: Mesh; shield: Mesh; warning: Mesh; glow: Mesh; wheels: Mesh[]; speed: number; slopePitch: number; slopeRoll: number; trailAt: number };
+import { buildTankModel, type TankVisual } from './tank-model';
 
 type Particle = { mesh: Mesh; vx: number; vy: number; vz: number; life: number; max: number; grow: number };
 
@@ -626,64 +626,9 @@ export class BattleRenderer {
   }
 
   private buildTank(t: Tank): TankVisual {
-    const root = new TransformNode(t.id, this.scene);
-    const chassis = new TransformNode('suspension', this.scene);
-    chassis.parent = root;
-    const color = t.team === 'player' ? COLORS[t.color % 4] : t.kind === 'heavy' ? '#ad6e5d' : t.kind === 'scout' ? '#bf8964' : '#bd7967';
-    const body = this.box('hull', 1.65, 0.52, 2.15, color, chassis);
-    body.position.y = 0.56;
-    const deck = this.box('deck', 1.4, 0.2, 1.8, color, chassis);
-    deck.position.y = 0.86;
-    const wheels: Mesh[] = [];
-    for (const side of [-1, 1]) {
-      const tread = this.box('track', 0.42, 0.52, 2.35, '#50594e', chassis);
-      tread.position.set(side * 0.91, 0.36, 0);
-      for (let i = -1; i <= 1; i++) {
-        const wheel = this.cylinder('wheel', 0.4, 0.4, 0.45, '#76806b', chassis, 8);
-        wheel.rotation.z = Math.PI / 2;
-        wheels.push(wheel);
-        wheel.position.set(side * 0.92, 0.35, i * 0.7);
-      }
-      const strip = this.box('track-guard', 0.5, 0.12, 2.25, color, chassis);
-      strip.position.set(side * 0.91, 0.71, 0);
-      const light = this.box('headlight', 0.18, 0.14, 0.08, '#f2dda9', chassis);
-      light.material = this.material('#f3d9a5', true);
-      light.position.set(side * 0.61, 0.65, 1.1);
-    }
-    const turret = new TransformNode('turret', this.scene);
-    turret.parent = root;
-    turret.position.y = 0.91;
-    const top = this.cylinder('turret-armor', 0.9, 1.35, 0.52, color, turret, 6);
-    top.position.y = 0.2;
-    const hatch = this.cylinder('hatch', 0.5, 0.5, 0.09, '#d3cfaf', turret);
-    hatch.position.set(-0.08, 0.51, -0.12);
-    const gun = new TransformNode('gun-elevation', this.scene);
-    gun.parent = turret;
-    gun.position.y = 0.22;
-    const barrel = this.cylinder('barrel', 0.18, 0.26, 1.65, color, gun);
-    barrel.rotation.x = Math.PI / 2;
-    barrel.position.set(0, 0, 1.13);
-    const muzzle = this.cylinder('muzzle', 0.28, 0.28, 0.25, '#465a4e', gun);
-    muzzle.rotation.x = Math.PI / 2;
-    muzzle.position.set(0, 0, 1.94);
-    const warning = MeshBuilder.CreateSphere('aim-warning', { diameter: 0.42, segments: 4 }, this.scene);
-    warning.parent = gun;
-    warning.position.set(0, 0, 2.12);
-    warning.material = this.material('#ffe6a0', true);
-    warning.setEnabled(false);
-    const stripe = this.box('stripe', 0.13, 0.018, 0.6, '#f2e5c8', chassis);
-    stripe.position.set(0.45, 0.973, -0.55);
-    const antenna = this.cylinder('antenna', 0.025, 0.035, 0.75, '#4b594c', turret);
-    antenna.position.set(0.4, 0.85, -0.4);
-    const shield = MeshBuilder.CreateTorus('shield', { diameter: 2.75, thickness: 0.07, tessellation: 24 }, this.scene);
-    shield.material = this.material('#b1e5d4', true);
-    shield.parent = root;
-    shield.position.y = 0.11;
-    for (const mesh of root.getChildMeshes()) this.shadows.addShadowCaster(mesh);
-    if (t.kind === 'heavy') root.scaling.setAll(1.12);
-    const glow = MeshBuilder.CreateIcoSphere('charge-glow', { radius: 0.32, subdivisions: 1, flat: true }, this.scene);
-    glow.parent = gun; glow.position.z = 2.05; glow.material = this.material('#ffe8ab', true); glow.setEnabled(false);
-    return { root, chassis, gun, turret, barrel, body, shield, warning, glow, wheels, speed: 0, slopePitch: 0, slopeRoll: 0, trailAt: 0 };
+    const visual = buildTankModel(t, { scene: this.scene, material: this.material.bind(this), box: this.box.bind(this), cylinder: this.cylinder.bind(this) });
+    for (const mesh of visual.root.getChildMeshes()) this.shadows.addShadowCaster(mesh);
+    return visual;
   }
 
   private particle(x: number, y: number, z: number, color: string, smoke = false, force = 1, material?: BattleEvent['material']) {
@@ -706,7 +651,7 @@ export class BattleRenderer {
   private handleEvent(event: BattleEvent, local?: Tank) {
     const d = local ? distance(event, local) : 25;
     const falloff = clamp(1 - d / 35, 0, 1);
-    this.audio.play(event.kind === 'capture' ? 'pickup' : event.kind, falloff, event.charge === undefined ? event.material ?? event.target : 'charged');
+    this.audio.play(event.kind === 'capture' || event.kind === 'repair' ? 'pickup' : event.kind, falloff, event.charge === undefined ? event.material ?? event.target : 'charged');
     if (event.kind === 'destroy') {
       const force = event.target === 'tank' ? event.owner === local?.id ? 1.5 : 1.15 : event.target === 'base' || event.target === 'tower' ? 1.4 : event.size * 0.2;
       this.shake = Math.min(1.65, this.shake + force * falloff);
@@ -745,7 +690,7 @@ export class BattleRenderer {
         this.pulse(event.x, event.z, 1.5 + event.charge * 2.5, !!waterAt(event, this.map));
         for (let i = 0; i < 6; i++) this.particle(event.x, event.y ?? groundHeight(event.x, event.z, this.map) + 0.5, event.z, '#efc58c', false, 0.8 + event.charge);
       }
-    } else if (event.kind === 'pickup' || event.kind === 'capture') {
+    } else if (event.kind === 'pickup' || event.kind === 'capture' || event.kind === 'repair') {
       for (let i = 0; i < 8; i++) this.particle(event.x, groundHeight(event.x, event.z, this.map) + 1, event.z, '#b5ddbc');
     }
   }
@@ -772,7 +717,8 @@ export class BattleRenderer {
     }
     for (const t of state.tanks) {
       let visual = this.tankVisuals.get(t.id);
-      if (!visual) {
+      if (!visual || visual.kind !== t.kind || visual.color !== t.color) {
+        if (visual) { for (const mesh of visual.root.getChildMeshes()) this.shadows.removeShadowCaster(mesh); visual.root.dispose(); }
         visual = this.buildTank(t);
         visual.root.position.set(t.x, groundHeight(t.x, t.z, this.map), t.z);
         visual.root.rotation.y = t.angle;
@@ -807,7 +753,7 @@ export class BattleRenderer {
       visual.warning.scaling.setAll(0.65 + t.warning * 0.9);
       visual.warning.visibility = 0.65 + Math.sin(this.elapsed * 22) * 0.3;
       visual.glow.setEnabled(t.charging);
-      visual.glow.scaling.setAll(0.4 + chargePower(t.charge) * 1.2 + Math.sin(this.elapsed * 12) * 0.08);
+      visual.glow.scaling.setAll(0.4 + chargePower(t.charge, t.kind) * 1.2 + Math.sin(this.elapsed * 12) * 0.08);
     }
     for (const [id, visual] of this.tankVisuals) {
       if (!state.tanks.some(t => t.id === id)) { visual.root.dispose(); this.tankVisuals.delete(id); }

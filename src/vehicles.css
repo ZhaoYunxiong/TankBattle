@@ -1,0 +1,54 @@
+.vehicle-entry { display:flex; align-items:center; justify-content:space-between; gap:12px; width:100%; margin:10px 0 12px; padding:10px 13px; border:1px solid #81977a55; border-radius:9px; background:#eef0e2; color:#3f5d4c; text-align:left; }
+.vehicle-entry span { display:grid; gap:3px; }
+.vehicle-entry small { font-size:10px; color:#748269; }
+.vehicle-entry b { font-size:13px; font-weight:600; }
+.vehicle-entry > i { font-style:normal; font-size:19px; }
+.player-slot > span { min-width:0; }
+.player-slot em { display:block; margin-top:3px; color:#738267; font-size:10px; font-style:normal; }
+#vehicleDialog { width:min(780px, calc(100vw - 24px)); max-height:calc(100dvh - 24px); }
+.garage-content { padding:24px; }
+.garage-eyebrow { display:block; margin-bottom:5px; font-size:10px; letter-spacing:2px; color:#829177; }
+.vehicle-options { display:grid; grid-template-columns:repeat(4, minmax(0,1fr)); gap:8px; margin:20px 0 16px; }
+.vehicle-options button { display:grid; gap:6px; min-height:64px; padding:11px 8px; text-align:left; color:#4b6655; border:1px solid #83947440; border-radius:9px; background:#f8f7ed; }
+.vehicle-options button[aria-pressed=true] { background:#dce6d2; border-color:#75906a; box-shadow:inset 0 0 0 1px #75906a; }
+.vehicle-options b { font-size:12px; }
+.vehicle-options small { font-size:10px; color:#7d896e; }
+.garage-detail { display:grid; grid-template-columns:minmax(0,1fr) minmax(0,1fr); gap:22px; align-items:start; }
+.vehicle-stage { position:relative; overflow:hidden; border-radius:13px; background:#e1e5d5; }
+.vehicle-stage canvas { display:block; width:100%; height:280px; touch-action:none; outline:0; }
+.vehicle-stage > span { display:block; padding:0 10px 12px; text-align:center; color:#7b896f; font-size:10px; }
+#previewFallback { position:absolute; inset:40% 15px auto; text-align:center; color:#6c8061; font-size:12px; }
+.vehicle-title h3 { font-size:21px; font-weight:500; margin:0 0 7px; }
+.vehicle-title > span { color:#8b956e; font-size:11px; letter-spacing:2px; }
+.vehicle-info > p { font-size:12px; line-height:1.8; color:#7b876f; margin:12px 0; }
+.vehicle-trait { padding:9px 11px; background:#e4e8d8; border-radius:7px; font-size:11px; line-height:1.6; color:#54724f; }
+.vehicle-stats { display:grid; grid-template-columns:repeat(3,minmax(0,1fr)); gap:12px 8px; margin:16px 0 8px; }
+.vehicle-stats dt { font-size:10px; color:#8c927c; }
+.vehicle-stats dd { font-size:13px; margin:5px 0 0; color:#3e5d4b; white-space:nowrap; }
+.vehicle-info > .vehicle-detail-note { font-size:10px; margin-bottom:0; }
+.garage-footer { position:sticky; bottom:-24px; padding:12px 0 0; margin-top:14px; background:#f3f0e5f7; border-top:1px solid #75876a30; }
+.garage-footer p { font-size:11px; color:#77856c; margin:0 0 8px; }
+.garage-footer .primary { width:100%; min-height:43px; }
+.garage-footer > small { display:block; text-align:center; padding-top:8px; font-size:10px; color:#92957f; }
+#repairStatus { display:block; color:#c9edc3; font-size:9px; white-space:nowrap; }
+@media (max-width:600px) {
+  .garage-content { padding:17px; }
+  #vehicleDialog .dialog-header h2 { font-size:24px; letter-spacing:1px; }
+  .vehicle-options { grid-template-columns:repeat(2,minmax(0,1fr)); gap:7px; margin:14px 0 12px; }
+  .vehicle-options button { min-height:56px; padding:8px 10px; }
+  .garage-detail { grid-template-columns:1fr; gap:14px; }
+  .vehicle-stage canvas { height:185px; }
+  .vehicle-stage > span { font-size:9px; padding-bottom:8px; }
+  .vehicle-title { display:flex; align-items:baseline; justify-content:space-between; gap:6px; }
+  .vehicle-title h3 { font-size:19px; }
+  .vehicle-title > span { letter-spacing:0; }
+  .vehicle-info > p { margin:7px 0; font-size:11px; }
+  .vehicle-stats { gap:9px; margin:12px 0 8px; }
+  .garage-footer { bottom:-17px; }
+}
+@media (max-height:450px) and (min-width:601px) {
+  .garage-content { padding:16px; }
+  .vehicle-options { margin:12px 0; }
+  .vehicle-stage canvas { height:210px; }
+  .garage-footer { bottom:-16px; }
+}

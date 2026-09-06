@@ -9,6 +9,7 @@ const browser = await chromium.launch({
   args: ['--enable-unsafe-swiftshader', '--disable-background-timer-throttling', '--disable-renderer-backgrounding'],
 });
 const errors = [];
+const funded = { version: 1, id: 'published-vehicle-check', honor: 5000, coins: 1600, earned: 1600, battles: 0, wins: 0, upgrades: { armor: 0, mobility: 0, reload: 0, baseArmor: 0, repair: 0 }, records: [], settled: [] };
 try {
   const context = await browser.newContext({ viewport: { width: 390, height: 844 }, isMobile: true, hasTouch: true, deviceScaleFactor: 1 });
   const page = await context.newPage();
@@ -20,6 +21,15 @@ try {
   assert.equal(await page.locator('#difficulty').inputValue(), 'normal');
   assert.equal(await page.locator('#shake').inputValue(), '1.4');
   await page.screenshot({ path: 'artifacts/published-menu.png' });
+  await page.locator('#vehicleButton').tap();
+  assert.equal(await page.locator('[data-vehicle]').count(), 4);
+  for (const kind of ['standard', 'scout', 'engineer', 'heavy']) {
+    await page.locator(`[data-vehicle="${kind}"]`).tap();
+    await page.waitForFunction(() => document.querySelector('#vehiclePreview').dataset.ready === 'true');
+    assert.equal(await page.locator('#selectVehicle').isDisabled(), kind !== 'standard');
+  }
+  await page.screenshot({ path: 'artifacts/published-garage.png' });
+  await page.locator('#closeGarage').tap();
   await page.locator('#careerButton').tap();
   await page.locator('#careerDialog').waitFor({ state: 'visible' });
   assert.match(await page.locator('#careerSummary').textContent(), /累计荣誉/);
@@ -90,6 +100,23 @@ try {
   await page.screenshot({ path: 'artifacts/published-defense.png' });
   await page.locator('#pauseButton').tap();
   await page.locator('#backMenu').tap();
+  // 用正式的导入入口迁移旧档案，再验证金币解锁、选用及刷新后的记忆。
+  await page.locator('#careerButton').tap();
+  await page.locator('[data-career-tab="record"]').tap();
+  await page.locator('#profileFile').setInputFiles({ name: 'old-profile.json', mimeType: 'application/json', buffer: Buffer.from(JSON.stringify(funded)) });
+  await page.locator('#confirmImport').tap();
+  await page.locator('#closeCareer').tap();
+  await page.locator('#vehicleButton').tap();
+  await page.locator('[data-vehicle="heavy"]').tap();
+  await page.locator('#selectVehicle').tap();
+  await page.locator('#vehicleDialog').waitFor({ state: 'hidden' });
+  assert.equal(await page.locator('#selectedVehicleName').textContent(), '重型突破坦克');
+  const profile = await page.evaluate(() => JSON.parse(localStorage.getItem('tb-profile-v1')));
+  assert.equal(profile.version, 2); assert.equal(profile.coins, 1240); assert.equal(profile.honor, 5000);
+  assert.deepEqual(profile.unlockedVehicles, ['standard', 'heavy']);
+  await page.reload({ waitUntil: 'networkidle' });
+  assert.equal(await page.locator('#selectedVehicleName').textContent(), '重型突破坦克');
+  await page.locator('#modeDefense').tap();
   await page.locator('#difficulty').selectOption('casual');
   await page.locator('#mapSize').selectOption('large');
   await page.locator('#hostButton').tap();
@@ -98,10 +125,20 @@ try {
   const guestContext = await browser.newContext({ viewport: { width: 844, height: 390 }, isMobile: true, hasTouch: true, deviceScaleFactor: 1 });
   const guest = await guestContext.newPage();
   guest.on('pageerror', e => errors.push(e.message));
+  await guest.addInitScript(p => localStorage.setItem('tb-profile-v1', JSON.stringify(p)), funded);
   await guest.goto(url + '?room=' + code);
   await guest.locator('#connectButton').tap();
   await guest.locator('#lobbyDialog').waitFor({ state: 'visible', timeout: 40000 });
   assert.match(await guest.locator('#lobbyMode').textContent(), /防守模式 · 休闲 · 双桥远山/);
+  await guest.locator('#readyButton').tap();
+  await page.waitForFunction(() => !document.querySelector('#startRoom').disabled);
+  await guest.locator('#lobbyVehicle').tap();
+  await guest.locator('[data-vehicle="engineer"]').tap();
+  await guest.locator('#selectVehicle').tap();
+  await guest.locator('#vehicleDialog').waitFor({ state: 'hidden' });
+  await page.waitForFunction(() => document.querySelector('#players').textContent.includes('工程支援坦克'));
+  assert.match(await page.locator('#players').textContent(), /重型突破坦克/);
+  assert.equal(await page.locator('#startRoom').isDisabled(), true);
   await guest.locator('#readyButton').tap();
   await page.locator('#startRoom').tap();
   await guest.locator('#hud').waitFor({ state: 'visible' });
@@ -110,9 +147,12 @@ try {
   assert.equal(await guest.locator('#modeName').textContent(), '防守模式');
   assert.equal(await guest.locator('#enemyBaseCard').isVisible(), false);
   assert.equal(await guest.locator('#difficultyBadge').textContent(), '休闲');
+  assert.equal(await page.locator('#tankHealth').getAttribute('aria-valuemax'), '180');
+  assert.equal(await guest.locator('#tankHealth').getAttribute('aria-valuemax'), '110');
+  assert.equal(await guest.locator('#repairStatus').isVisible(), true);
   await guest.screenshot({ path: 'artifacts/published-multiplayer.png' });
   assert.deepEqual(errors, []);
-  console.log(JSON.stringify({ url, http: response.status(), singlePlayer: 'passed', boostAndCharge: 'passed', towerHud: 'passed', defaultStrongShake: 'passed', touchCancel: 'passed', transparentHud: 'passed', modes: ['classic', 'defense'], careerAndFactory: 'passed', tacticalMap: 'passed', pageZoomGuard: 'passed', difficultySync: 'passed', largeMapSync: 'passed', scoutingHud: 'passed', pickupFeedback: 'passed', mobileLayout: 'passed', publicWebRTC: 'passed', pageErrors: errors }));
+  console.log(JSON.stringify({ url, http: response.status(), singlePlayer: 'passed', boostAndCharge: 'passed', towerHud: 'passed', defaultStrongShake: 'passed', touchCancel: 'passed', transparentHud: 'passed', modes: ['classic', 'defense'], careerAndFactory: 'passed', fourVehiclePreviews: 'passed', oldProfileAndUnlock: 'passed', vehiclePersistence: 'passed', independentNetworkVehicles: 'passed', tacticalMap: 'passed', pageZoomGuard: 'passed', difficultySync: 'passed', largeMapSync: 'passed', scoutingHud: 'passed', pickupFeedback: 'passed', mobileLayout: 'passed', publicWebRTC: 'passed', pageErrors: errors }));
 } finally {
   await browser.close();
 }

@@ -1,10 +1,11 @@
-import type { Difficulty, Tank } from './types';
+import type { Difficulty } from './types';
 import type { MapSize } from './maps';
+import type { EnemyKind } from './vehicles';
 
 interface Balance {
   name: string;
   description: string;
-  hp: Record<Tank['kind'], number>;
+  hp: Record<EnemyKind, number>;
   baseHp: number;
   cooldown: number;
   heavyCooldown: number;

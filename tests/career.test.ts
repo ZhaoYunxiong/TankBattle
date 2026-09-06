@@ -35,7 +35,7 @@ describe('本地生涯与工厂', () => {
 
   it('导入拒绝不兼容版本、损坏数据和无效装备，不改动现有档案', () => {
     const p = newProfile();
-    expect(() => parseProfile(JSON.stringify({ ...p, version: 2 }))).toThrow();
+    expect(() => parseProfile(JSON.stringify({ ...p, version: 99 }))).toThrow();
     expect(() => parseProfile(JSON.stringify({ ...p, coins: -1 }))).toThrow();
     expect(() => parseProfile(JSON.stringify({ ...p, upgrades: { ...p.upgrades, armor: 99 } }))).toThrow();
     expect(() => parseProfile('{bad')).toThrow();

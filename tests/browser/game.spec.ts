@@ -1,5 +1,6 @@
 import { test, expect } from '@playwright/test';
 import { tapWhileHolding } from '../../scripts/touch-checks.mjs';
+import { PROTOCOL_VERSION } from '../../src/game/types';
 
 test('桌面真实三维渲染、驾驶、炮击和暂停', async ({ page }) => {
   const errors: string[] = [];
@@ -167,7 +168,7 @@ test('手机创建房间，第二位玩家通过真实 WebRTC 同步战场', asy
   const guestState = await guest.evaluate(() => (window as any).__tankBattle.state);
   expect(hostState.seed).toBe(guestState.seed);
   expect(new TextEncoder().encode(JSON.stringify(hostState)).length).toBeGreaterThan(16300);
-  expect(guestState.version).toBe(10);
+  expect(guestState.version).toBe(PROTOCOL_VERSION);
   expect(guestState.mapSize).toBe('large');
   expect(guestState.enemyBaseDiscovered).toBe(false);
   expect(guestState.explored.length).toBeGreaterThan(0);

@@ -18,11 +18,12 @@ function battle(difficulty: Difficulty = 'normal', count = 1) {
   return sim;
 }
 
-// 此处验证击毁后的出兵节奏，足量伤害避免浅水掩护改变测试前提。
+// 此处验证击毁后的出兵节奏；连续两次命中覆盖满血单发保护与浅水掩护。
 function damage(sim: Simulation, tank: Tank, amount = tank.maxHp * 2) {
   tank.shield = 0;
   const shell: Shell = { id: 900000, owner: 'p0', team: 'player', x: tank.x, y: groundHeight(tank.x, tank.z) + 1, z: tank.z, vx: 0, vy: 0, vz: 0, damage: amount, life: 1 };
   sim.state.shells.push(shell);
+  if (amount >= tank.maxHp) sim.state.shells.push({ ...shell, id: 900001 });
 }
 
 function encounter(enemyCount = 1) {

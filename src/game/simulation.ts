@@ -11,6 +11,7 @@ import { SHOT_HEIGHT, shotSlope, traceShot, type ShotTarget } from './combat';
 import { attackSize, DIFFICULTIES, enemyLimit, MAP_PRESSURE, reserveSize, waveSize } from './balance';
 
 import { advanceCapture, createSites, SITE } from './sites';
+import { cleanTankKind, ENGINEER, isTankKind, tankRadius, VEHICLES, vehicleStats } from './vehicles';
 
 interface EnemyMemory {
   lastSeen?: { x: number; z: number };
@@ -82,6 +83,12 @@ export class Simulation {
 
   private repairAt = 30;
 
+  private siteCombat = new Map<number, number>();
+
+  private servicedUntil = new Map<string, number>();
+
+  private repairScore = new Map<string, number>();
+
   constructor(seed = Math.floor(Math.random() * 0x7fffffff), mode: GameMode = 'classic', difficulty: Difficulty = 'normal', mapSize: MapSize = 'small') {
     this.random = seededRandom(seed);
     this.state = {
@@ -92,14 +99,14 @@ export class Simulation {
     };
   }
 
-  addPlayer(id: string, name: string, upgrades?: unknown): Tank | null {
+  addPlayer(id: string, name: string, upgrades?: unknown, kind?: unknown): Tank | null {
     const existing = this.state.tanks.find(t => t.id === id);
     if (existing) { existing.connected = true; return existing; }
     const players = this.state.tanks.filter(t => t.team === 'player');
     if (players.length >= 4) return null;
-    const t = this.makeTank(id, name.slice(0, 16) || '守卫者', 'player', 'standard');
+    const t = this.makeTank(id, name.slice(0, 16) || '守卫者', 'player', cleanTankKind(kind));
     t.upgrades = cleanLoadout(upgrades);
-    t.hp = t.maxHp = Math.round(120 * (1 + t.upgrades.armor * 0.08));
+    t.hp = t.maxHp = vehicleStats(t.kind, t.upgrades).hp;
     t.color = [0, 1, 2, 3].find(color => !players.some(p => p.color === color)) ?? 0;
     t.x = this.map.spawn.x + (t.color - 1.5) * 2.5;
     t.z = this.map.spawn.z;
@@ -109,6 +116,14 @@ export class Simulation {
     this.state.tanks.push(t);
     this.updateCampUpgrades();
     return t;
+  }
+
+  selectVehicle(id: string, kind: unknown): boolean {
+    const tank = this.state.tanks.find(t => t.id === id && t.team === 'player' && t.connected);
+    if (this.state.phase !== 'lobby' || !tank || !isTankKind(kind)) return false;
+    tank.kind = kind; tank.hp = tank.maxHp = vehicleStats(kind, tank.upgrades).hp;
+    tank.ready = this.state.tanks.filter(t => t.team === 'player')[0]?.id === id;
+    return true;
   }
 
   disconnect(id: string) {
@@ -163,12 +178,12 @@ export class Simulation {
   }
 
   private makeTank(id: string, name: string, team: Tank['team'], kind: Tank['kind']): Tank {
-    const hp = team === 'player' ? 120 : DIFFICULTIES[this.state.difficulty].hp[kind];
+    const hp = team === 'player' ? VEHICLES[kind].hp : DIFFICULTIES[this.state.difficulty].hp[kind === 'engineer' ? 'standard' : kind];
     return {
       id, name, team, kind, color: 0, x: 0, z: 0, angle: 0, turret: 0, hp, maxHp: hp,
-      cooldown: 0, stamina: BOOST.capacity, boosting: false, boostLocked: false, charging: false, charge: 0, recoil: 0,
+      cooldown: 0, stamina: BOOST.capacity, boosting: false, boostLocked: false, charging: false, charge: 0, recoil: 0, repairCooldown: 0, combatUntil: 0,
       warning: 0, exposedUntil: 0, lives: 2, respawn: 0, shield: 0, buffs: { rapid: 0, burst: 0, heal: 0, armor: 0 },
-      score: 0, connected: true, ready: true, upgrades: emptyLoadout(), stats: { kills: 0, assists: 0, defenses: 0, baseDamage: 0, teamBonus: 0, objectives: 0 },
+      score: 0, connected: true, ready: true, upgrades: emptyLoadout(), stats: { kills: 0, assists: 0, defenses: 0, baseDamage: 0, teamBonus: 0, objectives: 0, repairs: 0 },
     };
   }
 
@@ -270,6 +285,7 @@ export class Simulation {
     for (const t of s.tanks) {
       if (!t.connected) continue;
       t.cooldown = Math.max(0, t.cooldown - dt);
+      t.repairCooldown = Math.max(0, t.repairCooldown - dt);
       t.recoil *= Math.exp(-dt * 8);
       t.shield = Math.max(0, t.shield - dt);
       t.buffs.rapid = Math.max(0, t.buffs.rapid - dt);
@@ -278,7 +294,7 @@ export class Simulation {
         if (t.team === 'player' && t.respawn > 0) {
           t.respawn -= dt;
           if (t.respawn <= 0) {
-            t.hp = t.maxHp;
+            t.hp = t.maxHp; t.repairCooldown = ENGINEER.cooldown; t.combatUntil = s.time + ENGINEER.peace;
             t.x = this.map.spawn.x + (t.color - 1.5) * 2.5;
             t.z = this.map.spawn.z;
             t.shield = 4;
@@ -300,7 +316,8 @@ export class Simulation {
         }
       } else input = this.enemyInput(t, dt);
       t.turret += clamp(angleDiff(input.aim, t.turret), -dt * 3.4, dt * 3.4);
-      const speed = (t.team === 'player' ? 6 * (1 + t.upgrades.mobility * 0.04) : (t.kind === 'scout' ? 4.4 : t.kind === 'heavy' ? 2.5 : 3.3) * MAP_PRESSURE[s.mapSize].speed) * damageHandling(t.hp, t.maxHp).speed;
+      const vehicle = vehicleStats(t.kind, t.upgrades);
+      const speed = (t.team === 'player' ? vehicle.speed : (t.kind === 'scout' ? 4.4 : t.kind === 'heavy' ? 2.5 : 3.3) * MAP_PRESSURE[s.mapSize].speed) * damageHandling(t.hp, t.maxHp).speed;
       const slope = slopeSpeed(t.x, t.z, input.moveX, input.moveZ, this.map);
       if (!input.boost) t.boostLocked = false;
       const boost = t.team === 'player' && input.boost && !t.boostLocked && t.stamina > 0 && (t.boosting || t.stamina >= BOOST.restart);
@@ -313,26 +330,26 @@ export class Simulation {
         input.moveZ * speed * slope * (waterAt(t, this.map) === 'shallow' ? 0.6 : 1) * (boost ? BOOST.speed : 1) * dt);
       t.boosting = !!boost && !kick && Math.hypot(t.x - x, t.z - z) > 0.001;
       if (t.boosting) {
-        t.stamina = Math.max(0, t.stamina - BOOST.drain * dt); this.staminaRest.set(t.id, s.time);
+        t.stamina = Math.max(0, t.stamina - vehicle.boostDrain * dt); this.staminaRest.set(t.id, s.time);
         if (t.stamina <= 0.001) { t.stamina = 0; t.boostLocked = true; t.boosting = false; }
       } else if (s.time - (this.staminaRest.get(t.id) ?? -BOOST.recoveryDelay) >= BOOST.recoveryDelay) t.stamina = Math.min(BOOST.capacity, t.stamina + BOOST.recovery * dt);
       const received = this.inputs.get(t.id), fresh = !!received && s.time - received.at < 0.4;
       if (t.team === 'player' && input.chargeMode && fresh && s.phase === 'battle') {
         if (this.chargeReleases.delete(t.id)) {
           if (t.cooldown <= 0) {
-            const power = chargePower(t.charge);
-            this.fire(t, chargeDamage(t.charge), power);
-            t.cooldown = CHARGE.cooldown * (t.buffs.rapid > 0 ? 0.7 : 1) * (1 - t.upgrades.reload * 0.04);
+            const power = chargePower(t.charge, t.kind);
+            this.fire(t, chargeDamage(t.charge, t.kind), power);
+            t.cooldown = vehicle.chargeReload * (t.buffs.rapid > 0 ? 0.7 : 1);
           }
           this.cancelCharge(t);
-        } else if (input.fire && t.cooldown <= 0) { t.charging = true; t.charge = Math.min(CHARGE.seconds, t.charge + dt); }
+        } else if (input.fire && t.cooldown <= 0) { t.charging = true; t.charge = Math.min(vehicle.chargeSeconds, t.charge + dt); }
       } else {
         this.cancelCharge(t);
         if (input.fire && t.cooldown <= 0 && s.phase === 'battle') {
           const burst = t.buffs.burst > 0;
-          this.fire(t, burst ? 12 : t.team === 'player' ? 20 : 14);
+          this.fire(t, t.team === 'player' ? burst ? Math.round(vehicle.damage * 0.6) : vehicle.damage : burst ? 12 : 14);
           const balance = DIFFICULTIES[s.difficulty];
-          t.cooldown = t.team === 'player' ? (t.buffs.rapid > 0 ? 0.7 : 1) * (1 - t.upgrades.reload * 0.04) : (t.kind === 'heavy' ? balance.heavyCooldown : balance.cooldown) * MAP_PRESSURE[s.mapSize].reload;
+          t.cooldown = t.team === 'player' ? vehicle.reload * (t.buffs.rapid > 0 ? 0.7 : 1) : (t.kind === 'heavy' ? balance.heavyCooldown : balance.cooldown) * MAP_PRESSURE[s.mapSize].reload;
           t.warning = 0;
           const memory = this.memories.get(t.id);
           if (memory) memory.shotAt = undefined;
@@ -343,12 +360,13 @@ export class Simulation {
     for (const b of this.bursts) {
       if (s.time < b.at || b.count <= 0) continue;
       const t = s.tanks.find(t => t.id === b.tank);
-      if (t && t.hp > 0 && t.connected) this.fire(t, 12);
+      if (t && t.hp > 0 && t.connected) this.fire(t, t.team === 'player' ? Math.round(VEHICLES[t.kind].damage * 0.6) : 12);
       b.count--;
       b.at = s.time + 0.12;
     }
     this.bursts = this.bursts.filter(b => b.count > 0);
     this.advanceShells(dt);
+    this.repairVehicles();
     if (s.time >= this.scoutAt) {
       const discovered = s.enemyBaseDiscovered;
       updateVisibility(s); this.scoutAt = s.time + 0.2;
@@ -460,6 +478,7 @@ export class Simulation {
           ...source, vx: Math.sin(shot.angle) * 24, vy: shot.slope * 24, vz: Math.cos(shot.angle) * 24,
           damage: site.team === 'player' ? 20 : { casual: 14, normal: 16, challenge: 18 }[s.difficulty], life: 1.4 });
         this.event('shot', site.x, site.z, 0.8, 'site-' + site.id, undefined, source.y);
+        this.siteCombat.set(site.id, s.time + ENGINEER.peace);
         site.cooldown = SITE.reload; site.warning = 0; this.towerShots.delete(site.id);
       }
     }
@@ -473,9 +492,37 @@ export class Simulation {
     this.state.scars.push({ id: this.nextId++, x, z, radius, kind, surface, rotation: this.random() * Math.PI * 2 });
   }
 
+  private repairVehicles() {
+    const s = this.state;
+    for (const engineer of s.tanks) {
+      if (engineer.team !== 'player' || engineer.kind !== 'engineer' || !engineer.connected || engineer.hp <= 0 || engineer.charging || engineer.combatUntil > s.time || engineer.repairCooldown > 0) continue;
+      let worked = false;
+      const service = (target: { x: number; z: number; hp: number; maxHp: number }, key: string, amount: number, self: boolean) => {
+        if (target.hp <= 0 || target.hp >= target.maxHp || distance(engineer, target) > ENGINEER.range || !sightClear(s, engineer, target) || (this.servicedUntil.get(key) ?? 0) > s.time) return;
+        const restored = Math.min(amount, target.maxHp - target.hp);
+        target.hp += restored; worked = true;
+        // 多辆工程车共用目标维修间隔，避免围在一起无限叠加维修速度。
+        this.servicedUntil.set(key, s.time + ENGINEER.cooldown);
+        if (!self) {
+          engineer.stats.repairs += restored;
+          const earned = this.repairScore.get(engineer.id) ?? 0, points = Math.min(300 - earned, restored * 0.5);
+          engineer.score += points; this.repairScore.set(engineer.id, earned + points);
+        }
+        this.event('repair', target.x, target.z, restored, engineer.id);
+      };
+      for (const tank of s.tanks) if (tank.team === engineer.team && tank.connected && !tank.charging && tank.combatUntil <= s.time) {
+        service(tank, tank.id, tank === engineer ? ENGINEER.self : ENGINEER.ally, tank === engineer);
+      }
+      for (const site of s.sites) if (site.kind === 'tower' && site.team === engineer.team && !site.contested && site.warning <= 0 && (this.siteCombat.get(site.id) ?? 0) <= s.time) {
+        service(site, 'site-' + site.id, ENGINEER.tower, false);
+      }
+      if (worked) engineer.repairCooldown = ENGINEER.cooldown;
+    }
+  }
+
   private move(t: Tank, dx: number, dz: number) {
-    const free = (x: number, z: number) => !blocked(x, z, this.solids, 0.85, this.state.mode, this.map) && !this.state.tanks.some(other =>
-      other.id !== t.id && other.connected && other.hp > 0 && Math.hypot(x - other.x, z - other.z) < 1.5);
+    const free = (x: number, z: number) => !blocked(x, z, this.solids, tankRadius(t) - 0.1, this.state.mode, this.map) && !this.state.tanks.some(other =>
+      other.id !== t.id && other.connected && other.hp > 0 && Math.hypot(x - other.x, z - other.z) < tankRadius(t) + tankRadius(other) - 0.4);
     if (free(t.x + dx, t.z)) t.x += dx;
     if (free(t.x, t.z + dz)) t.z += dz;
   }
@@ -570,7 +617,7 @@ export class Simulation {
       const x = recipient.x + Math.sin(angle) * 2.8;
       const z = recipient.z + Math.cos(angle) * 2.8;
       if (Array.from({ length: 8 }, (_, j) => (j + 1) / 8).every(at =>
-        !blocked(recipient.x + (x - recipient.x) * at, recipient.z + (z - recipient.z) * at, this.solids, 0.85, this.state.mode, this.map))) {
+        !blocked(recipient.x + (x - recipient.x) * at, recipient.z + (z - recipient.z) * at, this.solids, tankRadius(recipient) - 0.1, this.state.mode, this.map))) {
         this.state.drops.push({ id: this.nextId++, kind: 'heal', x, z, life: 60 });
         return;
       }
@@ -580,6 +627,7 @@ export class Simulation {
 
   private fire(t: Tank, damage: number, power?: number) {
     t.exposedUntil = this.state.time + 5;
+    t.combatUntil = this.state.time + ENGINEER.peace;
     const spread = damageHandling(t.hp, t.maxHp).spread + (t.team === 'enemy' ? 0.035 : 0);
     const angle = t.turret + (this.random() - 0.5) * spread * 2;
     const speed = power === undefined ? 27 : 32 + power * 8;
@@ -632,6 +680,7 @@ export class Simulation {
       const site = this.state.sites.find(s => s.id === target.id)!;
       if (site.hp <= 0 || site.team === shell.team) return;
       site.hp = Math.max(0, site.hp - shell.damage);
+      this.siteCombat.set(site.id, this.state.time + ENGINEER.peace);
       const key = 'site-' + site.id;
       if (shooter?.team === 'player' && site.team === 'enemy') {
         if (!this.contributions.has(key)) this.contributions.set(key, new Map());
@@ -676,10 +725,14 @@ export class Simulation {
       }
     } else {
       const t = this.state.tanks.find(t => t.id === target.id)!;
+      t.combatUntil = this.state.time + ENGINEER.peace;
       if (t.shield > 0) return;
       const cover = terrainCover(t, this.state);
       // 环境掩护先减伤，再扣除护盾耐久；多种环境只取最强一项。
-      const damage = shell.damage * (1 - (cover ? COVER_REDUCTION[cover] : 0));
+      const incoming = Math.atan2(-shell.vx, -shell.vz);
+      const front = t.team === 'player' && t.kind === 'heavy' && Math.hypot(shell.vx, shell.vz) > 0.001 && Math.abs(angleDiff(incoming, t.angle)) <= Math.PI / 3;
+      // 单发对坦克的伤害最多为其满耐久减一；重炮也不能直接击毁满血目标。
+      const damage = Math.min(Math.max(0, shell.damage), Math.max(0, t.maxHp - 1)) * (front ? 0.8 : 1) * (1 - (cover ? COVER_REDUCTION[cover] : 0));
       const absorbed = Math.min(t.buffs.armor, damage);
       t.buffs.armor -= absorbed;
       t.hp = Math.max(0, t.hp - (damage - absorbed));

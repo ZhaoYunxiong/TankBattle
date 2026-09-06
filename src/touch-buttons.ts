@@ -1,40 +1,47 @@
-export function enableHudTouchButtons(hud: HTMLElement) {
-  const reset = new Set<() => void>();
-  for (const button of hud.querySelectorAll<HTMLButtonElement>('button:not(#fireButton)')) {
-    let touch: { id: number; x: number; y: number; moved: boolean } | undefined;
-    let suppressTouchClick = false;
-    const clear = () => { touch = undefined; };
-    reset.add(clear);
+// HUD 与可滚动车库共用触点判定，动态生成的车型按钮也能响应。
+function wireTouchButtons(root: HTMLElement, canActivate: (button: HTMLButtonElement) => boolean) {
+  const touches = new Map<number, { button: HTMLButtonElement; x: number; y: number; moved: boolean }>();
+  const suppressTouchClick = new WeakSet<HTMLButtonElement>();
+  const buttonAt = (event: Event) => {
+    const button = event.target instanceof Element ? event.target.closest<HTMLButtonElement>('button:not(#fireButton)') : null;
+    return button && root.contains(button) ? button : null;
+  };
+  root.addEventListener('pointerdown', event => {
+    const button = buttonAt(event); if (!button) return;
+    if (event.pointerType !== 'touch') { suppressTouchClick.delete(button); return; }
+    // 浏览器可能在拖动、旋屏或防缩放后不补发 click，每个按钮独立跟踪触点。
+    suppressTouchClick.add(button); event.preventDefault();
+    if (button.disabled || [...touches.values()].some(t => t.button === button)) return;
+    touches.set(event.pointerId, { button, x: event.clientX, y: event.clientY, moved: false });
+    button.setPointerCapture(event.pointerId);
+  });
+  root.addEventListener('pointermove', event => {
+    const touch = touches.get(event.pointerId);
+    if (touch && Math.hypot(event.clientX - touch.x, event.clientY - touch.y) > 10) touch.moved = true;
+  });
+  root.addEventListener('pointerup', event => {
+    const touch = touches.get(event.pointerId); if (!touch) return;
+    touches.delete(event.pointerId); event.preventDefault();
+    const button = touch.button, rect = button.getBoundingClientRect();
+    if (touch.moved || Math.hypot(event.clientX - touch.x, event.clientY - touch.y) > 10 ||
+      event.clientX < rect.left || event.clientX > rect.right || event.clientY < rect.top || event.clientY > rect.bottom ||
+      !root.contains(button) || button.disabled || button.closest('[hidden]') || !canActivate(button)) return;
+    button.click();
+  });
+  for (const name of ['pointercancel', 'lostpointercapture'] as const) root.addEventListener(name, event => touches.delete(event.pointerId));
+  root.addEventListener('click', event => {
+    const button = buttonAt(event);
+    // 只保留单次激活；浏览器补发的原生点击被忽略，键盘与鼠标仍然正常工作。
+    if (button && suppressTouchClick.has(button) && event.isTrusted && event.detail > 0) { event.preventDefault(); event.stopImmediatePropagation(); }
+  }, true);
+  window.addEventListener('blur', () => touches.clear());
+  document.addEventListener('visibilitychange', () => { if (document.hidden) touches.clear(); });
+}
 
-    button.addEventListener('pointerdown', event => {
-      if (event.pointerType !== 'touch') { suppressTouchClick = false; return; }
-      // 多指和防缩放拦截后不能依赖浏览器补发 click，每个按钮独立跟踪触点。
-      suppressTouchClick = true;
-      event.preventDefault();
-      if (touch || button.disabled) return;
-      touch = { id: event.pointerId, x: event.clientX, y: event.clientY, moved: false };
-      button.setPointerCapture(event.pointerId);
-    });
-    button.addEventListener('pointermove', event => {
-      if (touch?.id === event.pointerId && Math.hypot(event.clientX - touch.x, event.clientY - touch.y) > 10) touch.moved = true;
-    });
-    button.addEventListener('pointerup', event => {
-      if (touch?.id !== event.pointerId) return;
-      const candidate = touch; clear(); event.preventDefault();
-      const rect = button.getBoundingClientRect();
-      if (candidate.moved || Math.hypot(event.clientX - candidate.x, event.clientY - candidate.y) > 10 ||
-        event.clientX < rect.left || event.clientX > rect.right || event.clientY < rect.top || event.clientY > rect.bottom ||
-        button.disabled || button.closest('[hidden]') || document.querySelector('dialog[open]')) return;
-      button.click();
-    });
-    for (const name of ['pointercancel', 'lostpointercapture'] as const) button.addEventListener(name, event => {
-      if (touch?.id === event.pointerId) clear();
-    });
-    button.addEventListener('click', event => {
-      // 部分浏览器还会补发原生点击；只保留上面的单次激活，键盘和鼠标正常工作。
-      if (suppressTouchClick && event.isTrusted && event.detail > 0) { event.preventDefault(); event.stopImmediatePropagation(); }
-    }, true);
-  }
-  window.addEventListener('blur', () => reset.forEach(clear => clear()));
-  document.addEventListener('visibilitychange', () => { if (document.hidden) reset.forEach(clear => clear()); });
+export function enableHudTouchButtons(hud: HTMLElement) {
+  wireTouchButtons(hud, () => !document.querySelector('dialog[open]'));
+}
+
+export function enableDialogTouchButtons(dialog: HTMLDialogElement) {
+  wireTouchButtons(dialog, button => dialog.open && button.closest('dialog') === dialog);
 }

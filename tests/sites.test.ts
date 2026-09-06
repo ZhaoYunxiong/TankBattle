@@ -163,7 +163,8 @@ it.each(['small', 'medium'] as const)('%s 地图的残兵补充遵守规模规�
   const initial = sim.state.tanks.filter(t => t.team === 'enemy'), survivor = initial.at(-1)!;
   for (const target of initial.slice(1, -1)) {
     target.shield = 0;
-    sim.state.shells.push({ id: 90000 + target.x, owner: p.id, team: 'player', x: target.x, z: target.z, y: groundHeight(target.x, target.z, MAPS[size]) + 1, vx: 0, vy: 0, vz: 0, damage: 10000, life: 1 });
+    // 两次命中用于完成击毁，保留满血单发保护规则。
+    for (let shot = 0; shot < 2; shot++) sim.state.shells.push({ id: 90000 + target.x + shot, owner: p.id, team: 'player', x: target.x, z: target.z, y: groundHeight(target.x, target.z, MAPS[size]) + 1, vx: 0, vy: 0, vz: 0, damage: 10000, life: 1 });
   }
   sim.step(1 / 30);
   for (const t of sim.state.tanks.filter(t => t.team === 'enemy')) t.shield = 1000;

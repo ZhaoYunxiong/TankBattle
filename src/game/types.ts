@@ -1,5 +1,6 @@
 import { mapFor, type MapSize } from './maps';
 import type { Loadout } from './factory';
+import type { TankKind } from './vehicles';
 
 export type Phase = 'lobby' | 'intermission' | 'battle' | 'won' | 'lost';
 
@@ -28,7 +29,7 @@ export interface Tank {
   id: string;
   name: string;
   team: 'player' | 'enemy';
-  kind: 'scout' | 'standard' | 'heavy';
+  kind: TankKind;
   color: number;
   x: number;
   z: number;
@@ -43,6 +44,8 @@ export interface Tank {
   charging: boolean;
   charge: number;
   recoil: number;
+  repairCooldown: number;
+  combatUntil: number;
   warning: number;
   exposedUntil: number;
   lives: number;
@@ -53,7 +56,7 @@ export interface Tank {
   connected: boolean;
   ready: boolean;
   upgrades: Loadout;
-  stats: { kills: number; assists: number; defenses: number; baseDamage: number; teamBonus: number; objectives: number };
+  stats: { kills: number; assists: number; defenses: number; baseDamage: number; teamBonus: number; objectives: number; repairs: number };
 }
 
 export interface Obstacle {
@@ -121,7 +124,7 @@ export interface Site {
 
 export interface BattleEvent {
   id: number;
-  kind: 'shot' | 'hit' | 'destroy' | 'pickup' | 'wave' | 'capture';
+  kind: 'shot' | 'hit' | 'destroy' | 'pickup' | 'wave' | 'capture' | 'repair';
   x: number;
   y?: number;
   z: number;
@@ -141,7 +144,7 @@ export interface Scar { id: number; x: number; z: number; radius: number; kind: 
 
 export interface Ping { owner: string; x: number; z: number; until: number }
 
-export const PROTOCOL_VERSION = 10;
+export const PROTOCOL_VERSION = 11;
 
 export interface State {
   version: typeof PROTOCOL_VERSION;
