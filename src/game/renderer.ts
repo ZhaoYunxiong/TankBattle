@@ -1,4 +1,5 @@
 import { mapFor, inRegion, waterAt, roadDistance, riverSection, type River } from './maps';
+import { fallenTreeShape, TREE_FALL_TIME } from './cover';
 import { Color3, Color4 } from '@babylonjs/core/Maths/math.color';
 import { Matrix, Vector3 } from '@babylonjs/core/Maths/math.vector';
 import { DirectionalLight } from '@babylonjs/core/Lights/directionalLight';
@@ -71,6 +72,8 @@ export class BattleRenderer {
   private eddies: Mesh[] = [];
 
   private fallen = new Map<number, number>();
+
+  private fallenVisuals = new Map<number, { body: TransformNode; pitch: number; lift: number }>();
 
   private settledTrees = new Set<number>();
 
@@ -180,7 +183,7 @@ export class BattleRenderer {
     this.terrain.dispose();
     this.terrain = new TransformNode('landscape', this.scene);
     this.obstacles.clear();
-    this.flags = []; this.grassPatches = []; this.clouds = []; this.ripples = []; this.eddies = []; this.fallen.clear(); this.settledTrees.clear(); this.scars.clear();
+    this.flags = []; this.grassPatches = []; this.clouds = []; this.ripples = []; this.eddies = []; this.fallen.clear(); this.fallenVisuals.clear(); this.settledTrees.clear(); this.scars.clear();
     for (const p of this.pulses) p.mesh.dispose();
     this.pulses = []; this.flash.intensity = 0; this.shake = 0; this.cameraKick.setAll(0);
     for (const mark of this.tracks) mark.mesh.dispose();
@@ -412,21 +415,35 @@ export class BattleRenderer {
     this.scars.set(scar.id, mesh);
   }
 
-  private settleTree(o: Obstacle, root: TransformNode) {
-    for (const mesh of root.getChildMeshes()) mesh.dispose();
+  private prepareFallenTree(o: Obstacle, root: TransformNode) {
+    const parts = root.getChildMeshes();
+    const body = new TransformNode('fallen-tree-body', this.scene); body.parent = root;
+    for (const part of parts) { part.parent = body; part.visibility = 1; }
     root.rotation.set(0, o.rotation, 0); root.scaling.setAll(1);
-    const slope = groundSlope(o.x, o.z, this.map);
-    root.rotation.x = -Math.atan(slope.x * Math.sin(o.rotation) + slope.z * Math.cos(o.rotation));
-    const stump = this.cylinder('persistent-stump', 0.42, 0.55, 0.38, '#ac9271', root, 7); stump.position.y = 0.17;
-    const length = o.height * 0.7;
-    const log = this.cylinder('fallen-log', 0.2, 0.43, length, o.variant === 'birch' ? '#cdcdb3' : '#7c7059', root, 7);
-    log.rotation.x = Math.PI / 2; log.position.set(0, 0.23, length * 0.5);
-    if (o.variant !== 'dead') {
-      const leaves = MeshBuilder.CreateIcoSphere('fallen-leaves', { radius: 1, subdivisions: 0, flat: true }, this.scene);
-      leaves.parent = root; leaves.material = this.material(o.variant === 'birch' ? '#acaf77' : '#758b6b');
-      leaves.scaling.set(0.85 * (o.crown ?? 1), 0.25, 0.85); leaves.position.set(0, 0.35, length * 0.85);
+    const shape = fallenTreeShape(o, this.map);
+    body.rotation.x = shape.pitch; body.position.set(0, 0.35, 0.35);
+    if (o.variant === 'pine' || o.variant === 'round') for (const side of [-1, 1]) {
+      const branch = this.cylinder('fallen-branch', 0.06, 0.17, o.height * 0.28, '#8c7860', body, 5);
+      branch.position.set(side * 0.35, o.height * (side > 0 ? 0.48 : 0.64), 0); branch.rotation.z = side * -0.85;
+      this.shadows.addShadowCaster(branch);
     }
-    this.settledTrees.add(o.id);
+    // 保留原树冠的立体网格与配色，按实际顶点托住坡面，避免树冠埋地或被压扁。
+    let lift = 0;
+    for (const part of body.getChildMeshes()) {
+      const matrix = part.computeWorldMatrix(true), positions = part.getVerticesData('position') ?? [];
+      for (let i = 0; i < positions.length; i += 3) {
+        const p = Vector3.TransformCoordinates(new Vector3(positions[i], positions[i + 1], positions[i + 2]), matrix);
+        lift = Math.max(lift, groundHeight(p.x, p.z, this.map) + 0.025 - p.y);
+      }
+      part.receiveShadows = true;
+    }
+    const stump = this.cylinder('persistent-stump', 0.35, 0.48, 0.42, o.variant === 'birch' ? '#d8d0b5' : '#8c7860', root, 7);
+    stump.position.y = 0.21;
+    const cut = this.cylinder('stump-cut', 0.32, 0.35, 0.07, '#c7ad83', root, 7); cut.position.y = 0.45; cut.rotation.z = 0.12;
+    this.shadows.addShadowCaster(stump); this.shadows.addShadowCaster(cut);
+    const visual = { body, pitch: shape.pitch, lift: body.position.y + lift };
+    this.fallenVisuals.set(o.id, visual);
+    return visual;
   }
 
   private drivingTrail(tank: Tank) {
@@ -483,8 +500,9 @@ export class BattleRenderer {
     root.parent = this.terrain;
     root.position.set(o.x, groundHeight(o.x, o.z, this.map), o.z);
     if (o.kind === 'tree') {
-      const trunk = this.cylinder('trunk', 0.18, 0.42, o.variant === 'dead' ? o.height : o.variant === 'birch' ? o.height * 0.8 : 1.4, o.variant === 'birch' ? '#e5dfc9' : '#8c7860', root);
-      trunk.position.y = o.variant === 'dead' ? o.height / 2 : o.variant === 'birch' ? o.height * 0.4 : 0.7;
+      const trunkHeight = o.height * (o.variant === 'dead' ? 1 : o.variant === 'birch' ? 0.8 : 0.72);
+      const trunk = this.cylinder('trunk', 0.18, 0.42, trunkHeight, o.variant === 'birch' ? '#e5dfc9' : '#8c7860', root);
+      trunk.position.y = trunkHeight / 2;
       if (o.variant === 'round') {
         const crown = MeshBuilder.CreateIcoSphere('round-crown', { radius: 1, subdivisions: 1, flat: true }, this.scene);
         crown.parent = root; crown.material = this.material('#8da582');
@@ -659,9 +677,11 @@ export class BattleRenderer {
         if (o.kind === 'tree' && o.hp > 0) { mesh.rotation.z = Math.sin(this.elapsed * 1.3 + o.id) * 0.018 + Math.sin(o.id) * 0.045; mesh.rotation.x = Math.cos(this.elapsed + o.id) * 0.012; }
         if (o.kind === 'tree' && o.hp <= 0 && !this.fallen.has(o.id)) this.fallen.set(o.id, 0);
         if (this.fallen.has(o.id) && !this.settledTrees.has(o.id)) {
-          const age = this.fallen.get(o.id)! + dt; this.fallen.set(o.id, age);
-          mesh.rotation.z = Math.min(1.5, age * age * 1.5);
-          if (age > 1.2) this.settleTree(o, mesh);
+          const age = Math.max(this.fallen.get(o.id)! + dt, o.fallenAt === undefined ? 0 : state.time - o.fallenAt); this.fallen.set(o.id, age);
+          const visual = this.fallenVisuals.get(o.id) ?? this.prepareFallenTree(o, mesh);
+          const progress = Math.min(1, age / TREE_FALL_TIME), eased = 1 - Math.cos(progress * Math.PI / 2);
+          visual.body.rotation.x = visual.pitch * eased; visual.body.position.set(0, visual.lift * eased, 0.35 * eased);
+          if (progress === 1) this.settledTrees.add(o.id);
         }
       }
     }

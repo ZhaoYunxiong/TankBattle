@@ -162,7 +162,7 @@ test('手机创建房间，第二位玩家通过真实 WebRTC 同步战场', asy
   const guestState = await guest.evaluate(() => (window as any).__tankBattle.state);
   expect(hostState.seed).toBe(guestState.seed);
   expect(new TextEncoder().encode(JSON.stringify(hostState)).length).toBeGreaterThan(16300);
-  expect(guestState.version).toBe(7);
+  expect(guestState.version).toBe(8);
   expect(guestState.mapSize).toBe('large');
   expect(guestState.enemyBaseDiscovered).toBe(false);
   expect(guestState.explored.length).toBeGreaterThan(0);

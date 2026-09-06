@@ -61,6 +61,7 @@ export interface Obstacle {
   team?: Tank['team'];
   tone?: number;
   crown?: number;
+  fallenAt?: number;
 }
 
 export interface Shell {
@@ -105,7 +106,7 @@ export interface Scar { id: number; x: number; z: number; radius: number; kind: 
 
 export interface Ping { owner: string; x: number; z: number; until: number }
 
-export const PROTOCOL_VERSION = 7;
+export const PROTOCOL_VERSION = 8;
 
 export interface State {
   version: typeof PROTOCOL_VERSION;

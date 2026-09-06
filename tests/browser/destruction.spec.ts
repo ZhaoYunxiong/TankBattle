@@ -23,7 +23,7 @@ test('树木残骸持续保留，石块和墙块的临时碎片回收', async ({
       sim.step(1 / 30);
       for (let frame = 0; frame < 20; frame++) renderer.render(sim.state, 'test-tank', 1 / 60, false);
       const tree = renderer.scene.getTransformNodeByName('obstacle-1')!;
-      const during = { treeVisible: tree.isEnabled(), treeTilt: tree.rotation.z, stone: renderer.scene.meshes.filter(m => m.name === 'stone-fragment').length, wall: renderer.scene.meshes.filter(m => m.name === 'wall-block').length };
+      const during = { treeVisible: tree.isEnabled(), treeTilt: renderer.scene.getTransformNodeByName('fallen-tree-body')!.rotation.x, stone: renderer.scene.meshes.filter(m => m.name === 'stone-fragment').length, wall: renderer.scene.meshes.filter(m => m.name === 'wall-block').length };
       for (let frame = 0; frame < 180; frame++) renderer.render(sim.state, 'test-tank', 1 / 60, false);
       return { during, treeAfter: tree.isEnabled(), debrisAfter: renderer.scene.meshes.filter(m => ['stone-fragment', 'wall-block', 'debris', 'smoke'].includes(m.name)).length, materials: sim.state.events.filter(e => e.kind === 'destroy').map(e => e.material) };
     } finally { renderer.scene.dispose(); renderer.engine.dispose(); canvas.remove(); }

@@ -1,4 +1,5 @@
 import { inRegion, mapFor, roadDistance, waterAt, type MapSize } from './maps';
+import { COVER_REDUCTION, terrainCover } from './cover';
 import { cleanLoadout, emptyLoadout } from './factory';
 import { uniqueId } from '../id';
 import { concealed, updateVisibility } from './visibility';
@@ -498,15 +499,19 @@ export class Simulation {
       if (o.kind === 'wall' && shell.team === (o.team ?? 'player')) return;
       o.hp = Math.max(0, o.hp - shell.damage);
       if (o.hp === 0) {
+        if (o.kind === 'tree') o.fallenAt = this.state.time;
         this.event('destroy', o.x, o.z, o.kind === 'tree' ? 1.1 : 1.8);
         Object.assign(this.state.events.at(-1)!, { obstacle: o.id, material: o.kind });
       }
     } else {
       const t = this.state.tanks.find(t => t.id === target.id)!;
       if (t.shield > 0) return;
-      const absorbed = Math.min(t.buffs.armor, shell.damage);
+      const cover = terrainCover(t, this.state);
+      // 环境掩护先减伤，再扣除护盾耐久；多种环境只取最强一项。
+      const damage = shell.damage * (1 - (cover ? COVER_REDUCTION[cover] : 0));
+      const absorbed = Math.min(t.buffs.armor, damage);
       t.buffs.armor -= absorbed;
-      t.hp = Math.max(0, t.hp - (shell.damage - absorbed));
+      t.hp = Math.max(0, t.hp - (damage - absorbed));
       if (t.team === 'enemy' && shooter?.team === 'player') {
         if (!this.contributions.has(t.id)) this.contributions.set(t.id, new Map());
         this.contributions.get(t.id)!.set(shooter.id, this.state.time);
