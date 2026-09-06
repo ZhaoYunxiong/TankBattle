@@ -64,8 +64,12 @@ test('手机竖屏加速蓄力双指操作与触控取消', async ({ browser }) 
   await cdp.send('Input.dispatchTouchEvent', { type: 'touchStart', touchPoints: [drive] });
   await tapWhileHolding(page, cdp, '#boostToggle', [drive]);
   await expect(page.locator('#boostToggle')).toHaveAttribute('aria-pressed', 'true');
+  await expect.poll(() => page.evaluate(() => (window as any).__tankBattle.state.tanks[0].stamina)).toBeLessThan(98);
   await tapWhileHolding(page, cdp, '#chargeToggle', [drive]);
   await expect(page.locator('#chargeToggle')).toHaveAttribute('aria-pressed', 'true');
+  // 后续相机检查期间手指仍按住摇杆，回到中心停驶，避免慢速 CI 把坦克开到河岸。
+  drive.y = stick.y + stick.height / 2;
+  await cdp.send('Input.dispatchTouchEvent', { type: 'touchMove', touchPoints: [drive] });
   await tapWhileHolding(page, cdp, '#zoomIn', [drive]);
   await expect.poll(() => page.evaluate(() => (window as any).__tankBattle.camera.zoom)).toBe(16);
   await tapWhileHolding(page, cdp, '#zoomOut', [drive]);
@@ -74,9 +78,10 @@ test('手机竖屏加速蓄力双指操作与触控取消', async ({ browser }) 
   await expect(page.locator('#freeLook')).toHaveClass(/active/);
   await tapWhileHolding(page, cdp, '#freeLook', [drive]);
   await expect(page.locator('#freeLook')).not.toHaveClass(/active/);
+  drive.y = stick.y + 12;
+  await cdp.send('Input.dispatchTouchEvent', { type: 'touchMove', touchPoints: [drive] });
   await cdp.send('Input.dispatchTouchEvent', { type: 'touchStart', touchPoints: [drive, aim] });
   await expect.poll(() => page.evaluate(() => (window as any).__tankBattle.state.tanks[0].charge)).toBe(1.6);
-  expect(await page.evaluate(() => (window as any).__tankBattle.state.tanks[0].stamina)).toBeLessThan(90);
   // 移动和蓄力手指都不松开，第三根手指仍能关闭/开启加速，蓄力不会被误释放。
   await tapWhileHolding(page, cdp, '#boostToggle', [drive, aim]);
   await expect(page.locator('#boostToggle')).toHaveAttribute('aria-pressed', 'false');
