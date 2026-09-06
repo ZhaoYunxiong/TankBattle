@@ -18,6 +18,7 @@ async function scenario(page: Page, grass = false, guest = false) {
     (window as any).fixtureFacing = Math.PI;
     (Simulation.prototype as any).enemyInput = function(t: any, dt: number) { return t.id === 'target' ? { ...EMPTY_INPUT, aim: t.turret } : enemyInput.call(this, t, dt); };
     Simulation.prototype.step = function(dt: number) {
+      if ((window as any).fixtureHold) return;
       if (this.state.phase === 'battle') {
         const players = this.state.tanks.filter(t => t.team === 'player');
         const player = players[guest ? 1 : 0];
@@ -43,6 +44,26 @@ async function scenario(page: Page, grass = false, guest = false) {
   }, { grass, guest });
 }
 
+async function holdAtFeedback(page: Page, selector: string, label: string) {
+  await page.evaluate(({ selector, label }) => {
+    const element = document.querySelector<HTMLElement>(selector)!;
+    // 提示只有约一秒；在浏览器内捕获出现时刻，避免云端指令往返错过提示。
+    // 仅冻结测试场景的模拟时钟，截图后恢复，继续验证真实的自动消退。
+    const observer = new MutationObserver(() => {
+      if (element.hidden || element.textContent !== label || !element.getClientRects().length) return;
+      (window as any).fixtureHold = true;
+      window.dispatchEvent(new KeyboardEvent('keyup', { code: 'Space', bubbles: true }));
+      observer.disconnect();
+    });
+    observer.observe(element, { attributes: true, childList: true, subtree: true });
+  }, { selector, label });
+}
+
+async function resumeAndCheckExpiry(page: Page, selector: string) {
+  await page.evaluate(() => { (window as any).fixtureHold = false; });
+  await expect(page.locator(selector)).toBeHidden();
+}
+
 test('桌面方向装甲、侧面与弱点反馈跟随真实炮弹，提示自动消退', async ({ page }) => {
   test.setTimeout(process.env.CI ? 180000 : 60000);
   const errors: string[] = []; page.on('pageerror', e => errors.push(e.message));
@@ -53,13 +74,10 @@ test('桌面方向装甲、侧面与弱点反馈跟随真实炮弹，提示自�
   let hp = 180;
   for (const [angle, impact, label, damage] of [[0, 'armor', '正面装甲减伤', 16], [Math.PI / 2, 'normal', '命中', 20], [Math.PI, 'weakpoint', '弱点命中', 25]] as const) {
     await page.evaluate(angle => { (window as any).fixtureFacing = angle; }, angle);
+    await holdAtFeedback(page, '#hitFeedback', label);
     await page.keyboard.down('Space');
     try {
-      await page.waitForFunction(hp => {
-        const s = (window as any).__tankBattle.state;
-        if (s.tanks.find((t: any) => t.id === 'target').hp >= hp) return false;
-        window.dispatchEvent(new KeyboardEvent('keyup', { code: 'Space', bubbles: true })); return true;
-      }, hp);
+      await page.waitForFunction(() => (window as any).fixtureHold);
     } finally { await page.keyboard.up('Space'); }
     hp -= damage;
     expect(await page.evaluate(() => (window as any).__tankBattle.state.tanks.find((t: any) => t.id === 'target').hp)).toBeCloseTo(hp);
@@ -69,11 +87,12 @@ test('桌面方向装甲、侧面与弱点反馈跟随真实炮弹，提示自�
     expect(await page.evaluate(() => (window as any).fixtureSparkColors)).toContain(expectedColor);
     expect(await page.locator('#hitFeedback').evaluate(e => getComputedStyle(e).backgroundColor)).toBe('rgba(0, 0, 0, 0)');
     await page.screenshot({ path: `artifacts/impact-${impact}.png` });
-    await expect(page.locator('#hitFeedback')).toBeHidden();
+    await resumeAndCheckExpiry(page, '#hitFeedback');
   }
+  await holdAtFeedback(page, '#impactStatus', '后部受击');
   await page.evaluate(() => { (window as any).fixtureIncoming = true; });
   await expect(page.locator('#impactStatus')).toHaveText('后部受击'); await expect(page.locator('#impactStatus')).toBeVisible();
-  await expect(page.locator('#impactStatus')).toBeHidden();
+  await resumeAndCheckExpiry(page, '#impactStatus');
   expect(errors).toEqual([]);
 });
 
@@ -122,6 +141,7 @@ test('手机竖屏和横屏高草准备、原生触摸蓄力与伏击弱点命�
       const finger = { id: 2, x: rect.x + rect.width / 2, y: rect.y + rect.height / 2 };
       await cdp.send('Input.dispatchTouchEvent', { type: 'touchStart', touchPoints: [finger] });
       await expect(page.locator('#touchReload')).toHaveText('松开发射');
+      await holdAtFeedback(page, '#hitFeedback', '伏击 · 弱点命中');
       await cdp.send('Input.dispatchTouchEvent', { type: 'touchEnd', touchPoints: [] });
       await expect(page.locator('#hitFeedback')).toHaveText('伏击 · 弱点命中');
       await expect(page.locator('#hitFeedback')).toBeVisible();
@@ -129,6 +149,7 @@ test('手机竖屏和横屏高草准备、原生触摸蓄力与伏击弱点命�
       expect(await page.evaluate(() => document.documentElement.scrollWidth <= innerWidth)).toBe(true);
       expect(await page.evaluate(() => visualViewport!.scale)).toBe(1);
       await page.screenshot({ path: `artifacts/ambush-mobile-${viewport.width}.png` });
+      await resumeAndCheckExpiry(page, '#hitFeedback');
     }
     const target = await page.evaluate(() => (window as any).__tankBattle.state.tanks.find((t: any) => t.id === 'target'));
     expect(target.hp).toBeCloseTo(28.8);
