@@ -17,6 +17,8 @@ html, body, #app { touch-action: pan-x pan-y; overscroll-behavior: none; }
 /* 滚动容器只接管单指滚动；战斗区域始终由游戏处理触控。 */
 .menu-screen, .hero, dialog { touch-action: pan-y; }
 #hud { touch-action: none; }
+/* 战斗文字和图标不参与 iOS 选词、放大镜与长按菜单，输入框和房间信息照常可选。 */
+#battlefield, #hud, #hud * { -webkit-user-select: none; user-select: none; -webkit-touch-callout: none; -webkit-user-drag: none; }
 body { margin: 0; width: 100%; height: 100dvh; overflow: hidden; }
 button, input, select { font: inherit; }
 button { cursor: pointer; }

@@ -82,7 +82,10 @@ dialog::backdrop { background: #43584650; backdrop-filter: blur(7px); }
 #fireButton { position: absolute; bottom: max(47px, env(safe-area-inset-bottom)); right: max(31px, env(safe-area-inset-right)); width: 89px; height: 89px; border: 1px solid #f6e6b492; border-radius: 50%; background: #ede5bf44; color: #fff7d6; display: flex; flex-direction: column; align-items: center; justify-content: center; gap: 6px; touch-action: none; }
 #fireButton svg { width: 31px; height: 31px; }
 #fireButton small { font-size: 9px; letter-spacing: 2px; }
-#fireButton.pressed { background: #f5db9975; transform: scale(.96); }
+/* 透明容错圈扩大触摸范围，按下反馈不缩小实际命中区域。 */
+#fireButton::before { content: ''; position: absolute; inset: -12px; border-radius: 50%; }
+#fireButton > * { pointer-events: none; }
+#fireButton.pressed { background: #f5db9975; }
 .camera-buttons { position: absolute; bottom: 151px; right: max(35px, env(safe-area-inset-right)); display: flex; gap: 6px; }
 .camera-buttons .icon-button { width: 36px; height: 36px; background: #344b4070; color: #fff4d9; border-color: #fff6; font-size: 12px; }
 .camera-buttons .active { background: #d3bb79b0; }

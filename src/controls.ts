@@ -30,6 +30,10 @@ export class Controls {
 
   private firing = false;
 
+  private firePointer = -1;
+
+  private fireHeld = false;
+
   private joystick = { x: 0, y: 0 };
 
   private stickPointer = -1;
@@ -57,16 +61,22 @@ export class Controls {
     window.addEventListener('keyup', e => { this.keys.delete(e.code); this.onChange(); });
     window.addEventListener('blur', () => this.reset());
     document.addEventListener('visibilitychange', () => { if (document.hidden) this.reset(); });
-    canvas.addEventListener('contextmenu', e => e.preventDefault());
+    // iOS 的长按选词、系统菜单与拖拽独立于 touch-action，战斗触点显式接管。
+    for (const surface of [canvas, stick, fire]) {
+      for (const name of ['contextmenu', 'selectstart', 'dragstart', 'touchstart', 'touchmove']) {
+        surface.addEventListener(name, e => { if (this.enabled && e.cancelable) e.preventDefault(); }, { passive: false });
+      }
+    }
     const aimDown = (e: PointerEvent) => {
       // 瞄准手指在松开前保持独占，额外手指不能抢走镜头并造成视角突跳。
       if (!this.enabled || this.lookPointer !== -1) return;
+      e.preventDefault();
       this.renderer.audio.unlock();
       this.lookPointer = e.pointerId;
       this.previous = { x: e.clientX, y: e.clientY };
       // 先捕获再申请鼠标锁定，避免锁定请求过程中再次捕获触发 InvalidStateError。
       if (!document.pointerLockElement) (e.currentTarget as HTMLElement).setPointerCapture(e.pointerId);
-      if (e.pointerType === 'mouse' && e.button === 0) {
+      if (e.currentTarget === canvas && e.pointerType === 'mouse' && e.button === 0) {
         this.firing = true;
         if (!document.pointerLockElement) {
           try { void canvas.requestPointerLock()?.catch(() => {}); } catch { /* 浏览器不允许锁定时仍可拖动瞄准。 */ }
@@ -84,7 +94,7 @@ export class Controls {
     };
     const aimUp = (e: PointerEvent) => {
       if (e.pointerId === this.lookPointer) {
-        if (e.type === 'pointercancel' || e.type === 'lostpointercapture') this.cancelSequence = (this.cancelSequence + 1) % 1e9;
+        if (this.firing && (e.type === 'pointercancel' || e.type === 'lostpointercapture')) this.cancelSequence = (this.cancelSequence + 1) % 1e9;
         this.lookPointer = -1; this.firing = false; this.onChange();
       }
     };
@@ -96,7 +106,8 @@ export class Controls {
       // 鼠标进入指针锁定也会释放捕获，此时仍然需要保持按住开火。
       if (document.pointerLockElement !== canvas) aimUp(e);
     });
-    window.addEventListener('mouseup', () => { this.firing = false; fire.classList.remove('pressed'); this.onChange(); });
+    // 兼容鼠标锁定后的释放；其他触点产生的兼容鼠标事件不能中断射击手指。
+    window.addEventListener('mouseup', e => { if (e.button === 0 && this.firing) { this.firing = false; this.onChange(); } });
     canvas.addEventListener('wheel', e => {
       if (!this.enabled) return;
       e.preventDefault();
@@ -105,6 +116,7 @@ export class Controls {
     }, { passive: false });
     stick.addEventListener('pointerdown', e => {
       if (!this.enabled || this.stickPointer !== -1) return;
+      e.preventDefault();
       this.stickPointer = e.pointerId;
       stick.setPointerCapture(e.pointerId);
       updateStick(e);
@@ -131,25 +143,36 @@ export class Controls {
     stick.addEventListener('pointercancel', stickUp);
     stick.addEventListener('lostpointercapture', stickUp);
     fire.addEventListener('pointerdown', e => {
+      if (!this.enabled || this.firePointer !== -1 || e.pointerType === 'mouse' && e.button !== 0) return;
+      e.preventDefault();
+      // 射击独立持有触点，即使另一根手指正在拖动镜头也能开火。
+      this.firePointer = e.pointerId; this.fireHeld = true;
+      fire.setPointerCapture(e.pointerId);
+      this.renderer.audio.unlock();
       aimDown(e);
-      if (this.lookPointer === e.pointerId) { this.firing = true; fire.classList.add('pressed'); }
+      fire.classList.add('pressed');
       this.onChange();
     });
     fire.addEventListener('pointermove', aimMove);
     const fireUp = (e: PointerEvent) => {
-      if (this.lookPointer !== e.pointerId) return;
+      if (this.firePointer !== e.pointerId) return;
+      e.preventDefault();
+      if (e.type === 'pointercancel' || e.type === 'lostpointercapture') this.cancelSequence = (this.cancelSequence + 1) % 1e9;
+      this.firePointer = -1; this.fireHeld = false;
       aimUp(e);
       fire.classList.remove('pressed');
+      this.onChange();
     };
     fire.addEventListener('pointerup', fireUp);
     fire.addEventListener('pointercancel', fireUp);
-    fire.addEventListener('lostpointercapture', e => { if (document.pointerLockElement !== canvas) fireUp(e); });
+    fire.addEventListener('lostpointercapture', fireUp);
   }
 
   reset() {
     this.cancelSequence = (this.cancelSequence + 1) % 1e9;
     this.keys.clear();
     this.firing = false;
+    this.firePointer = -1; this.fireHeld = false;
     this.joystick = { x: 0, y: 0 };
     this.stickPointer = -1;
     this.lookPointer = -1;
@@ -162,7 +185,7 @@ export class Controls {
   setChargeMode(enabled: boolean) {
     this.chargeMode = enabled;
     this.cancelSequence = (this.cancelSequence + 1) % 1e9;
-    this.firing = false; this.keys.delete('Space');
+    this.firing = false; this.fireHeld = false; this.keys.delete('Space');
     document.getElementById('fireButton')?.classList.remove('pressed');
     this.onChange();
   }
@@ -175,7 +198,7 @@ export class Controls {
     const forward = clamp(key('KeyW') + key('ArrowUp') - key('KeyS') - key('ArrowDown') + this.joystick.y, -1, 1);
     return {
       ...cameraRelativeMovement(right, forward, this.renderer.yaw),
-      aim: this.lastAim, fire: this.firing || this.keys.has('Space'),
+      aim: this.lastAim, fire: this.firing || this.fireHeld || this.keys.has('Space'),
       boost: this.boost, chargeMode: this.chargeMode, cancelCharge: this.cancelSequence,
     };
   }

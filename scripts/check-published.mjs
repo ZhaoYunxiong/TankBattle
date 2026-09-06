@@ -50,6 +50,21 @@ try {
   assert.equal(await page.locator('#enemyBaseCard').isVisible(), false);
   assert.equal(await page.locator('.player-card').count(), 0);
   assert.equal(await page.locator('#localTankStatus').isVisible(), true);
+  assert.equal(await page.locator('#touchReload').evaluate(e => getComputedStyle(e).webkitUserSelect), 'none');
+  const triggerArea = await page.locator('#fireButton').boundingBox();
+  const edge = { x: triggerArea.x - 8, y: triggerArea.y + triggerArea.height / 2 };
+  assert.equal(await page.evaluate(({ x, y }) => document.elementFromPoint(x, y)?.closest('button')?.id, edge), 'fireButton');
+  // 在浏览器内记录装填提示，避免快速点射后的短暂反馈被自动化指令往返错过。
+  await page.evaluate(() => {
+    window.touchShotObserved = false;
+    const label = document.querySelector('#touchReload'), observer = new MutationObserver(() => {
+      if (!/^[\d.]+s$/.test(label.textContent)) return;
+      window.touchShotObserved = true; observer.disconnect();
+    });
+    observer.observe(label, { childList: true, subtree: true });
+  });
+  await page.touchscreen.tap(edge.x, edge.y);
+  await page.waitForFunction(() => window.touchShotObserved);
   // 出生点的友塔位于侧面，横屏确认模型上方标签，随后恢复竖屏检查操作。
   await page.setViewportSize({ width: 844, height: 390 });
   await page.locator('.site-label[data-team=player]').first().waitFor({ state: 'visible' });
@@ -179,7 +194,7 @@ try {
   await tactical.waitForFunction(() => document.querySelector('#concealmentStatus').textContent === '隐蔽 · 首炮强化', null, { timeout: 20000 });
   await tacticsContext.close();
   assert.deepEqual(errors, []);
-  console.log(JSON.stringify({ url, http: response.status(), singlePlayer: 'passed', boostAndCharge: 'passed', towerHud: 'passed', defaultStrongShake: 'passed', touchCancel: 'passed', transparentHud: 'passed', modes: ['classic', 'defense'], careerAndFactory: 'passed', fourVehiclePreviews: 'passed', oldProfileAndUnlock: 'passed', vehiclePersistence: 'passed', independentNetworkVehicles: 'passed', weakpointInstructions: 'passed', grassAmbushAndRearm: 'passed', tacticalMap: 'passed', pageZoomGuard: 'passed', difficultySync: 'passed', largeMapSync: 'passed', scoutingHud: 'passed', pickupFeedback: 'passed', mobileLayout: 'passed', publicWebRTC: 'passed', pageErrors: errors }));
+  console.log(JSON.stringify({ url, http: response.status(), singlePlayer: 'passed', touchEdgeQuickShot: 'passed', battleTextSelectionGuard: 'passed', boostAndCharge: 'passed', towerHud: 'passed', defaultStrongShake: 'passed', touchCancel: 'passed', transparentHud: 'passed', modes: ['classic', 'defense'], careerAndFactory: 'passed', fourVehiclePreviews: 'passed', oldProfileAndUnlock: 'passed', vehiclePersistence: 'passed', independentNetworkVehicles: 'passed', weakpointInstructions: 'passed', grassAmbushAndRearm: 'passed', tacticalMap: 'passed', pageZoomGuard: 'passed', difficultySync: 'passed', largeMapSync: 'passed', scoutingHud: 'passed', pickupFeedback: 'passed', mobileLayout: 'passed', publicWebRTC: 'passed', pageErrors: errors }));
 } finally {
   await browser.close();
 }

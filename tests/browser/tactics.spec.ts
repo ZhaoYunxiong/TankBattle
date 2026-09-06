@@ -157,7 +157,7 @@ test('手机竖屏和横屏高草准备、原生触摸蓄力与伏击弱点命�
   } finally { await context.close(); }
 });
 
-test('联机客机开炮后双方同步后部伤害，命中提示只属于射手', async ({ browser }) => {
+test('联机客机快速点射后双方同步后部伤害，命中提示只属于射手', async ({ browser }) => {
   test.setTimeout(120000);
   const contexts = await Promise.all([0, 1].map(() => browser.newContext({ viewport: { width: 844, height: 390 }, isMobile: true, hasTouch: true })));
   try {
@@ -170,9 +170,8 @@ test('联机客机开炮后双方同步后部伤害，命中提示只属于射�
     await expect(guest.locator('#lobbyDialog')).toBeVisible({ timeout: 30000 }); await guest.locator('#readyButton').tap();
     await host.locator('#startRoom').tap(); await expect(guest.locator('#hud')).toBeVisible();
     await expect.poll(() => guest.evaluate(() => (window as any).__tankBattle.state.phase)).toBe('battle');
-    await guest.keyboard.down('Space');
-    try { await expect(guest.locator('#hitFeedback')).toHaveText('弱点命中'); }
-    finally { await guest.keyboard.up('Space'); }
+    await guest.locator('#fireButton').tap();
+    await expect(guest.locator('#hitFeedback')).toHaveText('弱点命中');
     for (const p of [host, guest]) {
       await expect.poll(() => p.evaluate(() => (window as any).__tankBattle.state.tanks.find((t: any) => t.id === 'target').hp)).toBe(155);
       expect(await p.evaluate(() => (window as any).__tankBattle.state.events.findLast((e: any) => e.impact)?.impact)).toBe('weakpoint');

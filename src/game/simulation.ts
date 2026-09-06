@@ -44,6 +44,8 @@ export class Simulation {
 
   private inputs = new Map<string, { value: Input; at: number }>();
 
+  private firePresses = new Set<string>();
+
   private chargeReleases = new Set<string>();
 
   private chargeHeld = new Set<string>();
@@ -129,7 +131,7 @@ export class Simulation {
 
   disconnect(id: string) {
     const t = this.state.tanks.find(t => t.id === id);
-    if (t) { t.connected = false; t.boosting = false; t.ambushCharge = 0; this.cancelCharge(t); this.inputs.delete(id); this.recoils.delete(id); }
+    if (t) { t.connected = false; t.boosting = false; t.ambushCharge = 0; this.cancelCharge(t); this.firePresses.delete(id); this.inputs.delete(id); this.recoils.delete(id); }
     if (this.state.phase === 'lobby') this.state.tanks = this.state.tanks.filter(t => t.id !== id);
     this.updateCampUpgrades();
   }
@@ -155,6 +157,10 @@ export class Simulation {
     const tank = this.state.tanks.find(t => t.id === id && t.team === 'player' && t.connected);
     if (!value || !tank) return;
     const received = this.inputs.get(id), previous = received?.value;
+    const canceled = (value.cancelCharge ?? 0) !== (previous?.cancelCharge ?? 0);
+    // 普通点射也保留同帧按下；只消费到下一模拟步，不排队跨越装填冷却。
+    if (canceled || value.chargeMode || this.state.paused || this.state.phase !== 'battle' || tank.hp <= 0) this.firePresses.delete(id);
+    else if (value.fire && !previous?.fire) this.firePresses.add(id);
     // 按下和松开都即时发送；即便两次输入落在同一模拟帧，也保留一次松开发射。
     if (!value.chargeMode || (value.cancelCharge ?? 0) !== (previous?.cancelCharge ?? 0) || this.state.paused || this.state.phase !== 'battle') this.cancelCharge(tank);
     else if (previous?.chargeMode && previous.fire && !value.fire && this.state.time - received!.at < 0.4 && this.chargeHeld.has(id)) this.chargeReleases.add(id);
@@ -249,6 +255,7 @@ export class Simulation {
 
   step(dt: number) {
     if (this.state.paused || ['lobby', 'won', 'lost'].includes(this.state.phase)) {
+      this.firePresses.clear();
       for (const t of this.state.tanks) { this.cancelCharge(t); t.boosting = false; }
       return;
     }
@@ -284,6 +291,7 @@ export class Simulation {
     this.focus.clear();
     this.advanceSites(dt);
     for (const t of s.tanks) {
+      const firePressed = this.firePresses.delete(t.id);
       if (!t.connected) continue;
       t.cooldown = Math.max(0, t.cooldown - dt);
       t.repairCooldown = Math.max(0, t.repairCooldown - dt);
@@ -347,7 +355,7 @@ export class Simulation {
         } else if (input.fire && t.cooldown <= 0) { t.charging = true; t.charge = Math.min(vehicle.chargeSeconds, t.charge + dt); }
       } else {
         this.cancelCharge(t);
-        if (input.fire && t.cooldown <= 0 && s.phase === 'battle') {
+        if ((input.fire || firePressed) && t.cooldown <= 0 && s.phase === 'battle') {
           const burst = t.buffs.burst > 0;
           this.fire(t, t.team === 'player' ? burst ? Math.round(vehicle.damage * 0.6) : vehicle.damage : burst ? 12 : 14);
           const balance = DIFFICULTIES[s.difficulty];
