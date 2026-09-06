@@ -10,17 +10,25 @@ test('桌面实际驶入补给点和中立防御塔，占领后界面与模型�
   await page.goto('./'); await expect(page.locator('#shake')).toHaveValue('1.4');
   await page.locator('#difficulty').selectOption('casual'); await page.locator('#soloButton').click();
   await expect.poll(() => page.evaluate(() => (window as any).__tankBattle.state.phase), simulationWait).toBe('battle');
-  await page.keyboard.down('KeyW');
-  await expect.poll(() => page.evaluate(() => (window as any).__tankBattle.state.tanks[0].z), simulationWait).toBeLessThan(24.7);
-  await page.keyboard.up('KeyW');
+  const drive = async (key: string, axis: 'x' | 'z', target: number) => {
+    await page.keyboard.down(key);
+    try {
+      // 和通关回归一样，到达道路坐标时就地松键，不能等远端轮询返回后才刹车。
+      await page.waitForFunction(({ key, axis, target }) => {
+        const p = (window as any).__tankBattle.state.tanks[0];
+        const arrived = key === 'KeyA' ? p[axis] >= target : p[axis] <= target;
+        if (arrived) window.dispatchEvent(new KeyboardEvent('keyup', { code: key, bubbles: true }));
+        return arrived;
+      }, { key, axis, target }, simulationWait);
+    } finally { await page.keyboard.up(key); }
+  };
+  await drive('KeyW', 'z', 24.5);
   await expect.poll(() => page.evaluate(() => (window as any).__tankBattle.state.sites.find((s: any) => s.kind === 'supply').team), simulationWait).toBe('player');
   await expect(page.locator('.site-label[data-site="-4"]')).toHaveAttribute('data-team', 'player');
   await page.screenshot({ path: 'artifacts/supply-captured.png' });
-  await page.keyboard.down('KeyD');
-  await expect.poll(() => page.evaluate(() => (window as any).__tankBattle.state.tanks[0].x), simulationWait).toBeLessThan(-23.5);
-  await page.keyboard.up('KeyD'); await page.keyboard.down('KeyW');
-  await expect.poll(() => page.evaluate(() => (window as any).__tankBattle.state.tanks[0].z), simulationWait).toBeLessThan(10.2);
-  await page.keyboard.up('KeyW');
+  await drive('KeyD', 'x', -30);
+  await drive('KeyW', 'z', 10);
+  await drive('KeyA', 'x', -26.5);
   await expect.poll(() => page.evaluate(() => (window as any).__tankBattle.state.sites.find((s: any) => s.kind === 'tower' && s.capturable).team), simulationWait).toBe('player');
   await expect(page.locator('.site-label[data-site="-3"]')).toHaveAttribute('data-team', 'player');
   expect(await page.evaluate(() => (window as any).__tankBattle.state.tanks[0].stats.objectives)).toBe(2);
