@@ -25,6 +25,7 @@ import { groundHeight, groundSlope, terrainVertex, terrainIntersection, TERRAIN_
 import { SHOT_HEIGHT, shotSlope, traceShot } from './combat';
 
 import { buildTankModel, type TankVisual } from './tank-model';
+import { IMPACTS } from './tactics';
 
 type Particle = { mesh: Mesh; vx: number; vy: number; vz: number; life: number; max: number; grow: number };
 
@@ -651,7 +652,8 @@ export class BattleRenderer {
   private handleEvent(event: BattleEvent, local?: Tank) {
     const d = local ? distance(event, local) : 25;
     const falloff = clamp(1 - d / 35, 0, 1);
-    this.audio.play(event.kind === 'capture' || event.kind === 'repair' ? 'pickup' : event.kind, falloff, event.charge === undefined ? event.material ?? event.target : 'charged');
+    this.audio.play(event.kind === 'capture' || event.kind === 'repair' ? 'pickup' : event.kind, falloff,
+      event.impact && event.impact !== 'normal' ? event.impact : event.charge === undefined ? event.material ?? event.target : 'charged');
     if (event.kind === 'destroy') {
       const force = event.target === 'tank' ? event.owner === local?.id ? 1.5 : 1.15 : event.target === 'base' || event.target === 'tower' ? 1.4 : event.size * 0.2;
       this.shake = Math.min(1.65, this.shake + force * falloff);
@@ -684,7 +686,9 @@ export class BattleRenderer {
       else if (event.owner === local?.id) this.shake = Math.max(this.shake, Math.min(0.25, this.shake + 0.1));
     } else if (event.kind === 'hit') {
       this.shake = Math.max(this.shake, Math.min(0.4, this.shake + 0.08 * falloff));
-      for (let i = 0; i < 4; i++) this.particle(event.x, event.y ?? groundHeight(event.x, event.z, this.map) + 0.7, event.z, '#edc788');
+      const impact = event.impact ?? 'normal', spark = IMPACTS[impact];
+      const count = impact === 'weakpoint' ? this.lowQuality ? 6 : 8 : impact === 'normal' ? 4 : 6;
+      for (let i = 0; i < count; i++) this.particle(event.x, event.y ?? groundHeight(event.x, event.z, this.map) + 0.7, event.z, spark.color, false, impact === 'weakpoint' ? 1.15 : impact === 'armor' ? 0.55 : 1);
       if (waterAt(event, this.map)) this.pulse(event.x, event.z, 1.7, true);
       if (event.charge !== undefined) {
         this.pulse(event.x, event.z, 1.5 + event.charge * 2.5, !!waterAt(event, this.map));

@@ -20,6 +20,10 @@ try {
   assert.equal(await page.locator('#modeClassic').getAttribute('aria-pressed'), 'true');
   assert.equal(await page.locator('#difficulty').inputValue(), 'normal');
   assert.equal(await page.locator('#shake').inputValue(), '1.4');
+  await page.locator('#helpButton').tap();
+  assert.match(await page.locator('#helpDialog').textContent(), /方向装甲与弱点/);
+  assert.match(await page.locator('#helpDialog').textContent(), /合计最多 35%/);
+  await page.locator('[data-close="helpDialog"]').tap();
   await page.screenshot({ path: 'artifacts/published-menu.png' });
   await page.locator('#vehicleButton').tap();
   assert.equal(await page.locator('[data-vehicle]').count(), 4);
@@ -151,8 +155,31 @@ try {
   assert.equal(await guest.locator('#tankHealth').getAttribute('aria-valuemax'), '110');
   assert.equal(await guest.locator('#repairStatus').isVisible(), true);
   await guest.screenshot({ path: 'artifacts/published-multiplayer.png' });
+  await guestContext.close(); await context.close();
+  // 在独立手机会话中通过实际驾驶进入固定草丛，不使用开发诊断入口。
+  const tacticsContext = await browser.newContext({ viewport: { width: 390, height: 844 }, isMobile: true, hasTouch: true, deviceScaleFactor: 1 });
+  const tactical = await tacticsContext.newPage(); tactical.on('pageerror', e => errors.push(e.message));
+  await tactical.addInitScript(() => { Math.random = () => 47 / 0x7fffffff; localStorage.setItem('tb-quality', 'low'); });
+  await tactical.goto(url, { waitUntil: 'networkidle' }); await tactical.locator('#soloButton').tap();
+  await tactical.waitForFunction(() => /敌军/.test(document.querySelector('#enemyCount').textContent));
+  await tactical.keyboard.down('KeyD'); await tactical.waitForTimeout(750); await tactical.keyboard.up('KeyD');
+  await tactical.keyboard.down('KeyW');
+  try {
+    await tactical.waitForFunction(() => {
+      if (!document.querySelector('#concealmentStatus').textContent.startsWith('隐蔽')) return false;
+      window.dispatchEvent(new KeyboardEvent('keyup', { code: 'KeyW', bubbles: true })); return true;
+    }, null, { timeout: 12000 });
+  } finally { await tactical.keyboard.up('KeyW'); }
+  await tactical.waitForFunction(() => document.querySelector('#concealmentStatus').textContent === '隐蔽 · 首炮强化');
+  await tactical.screenshot({ path: 'artifacts/published-ambush-ready.png' });
+  const tacticsCdp = await tacticsContext.newCDPSession(tactical), trigger = await tactical.locator('#fireButton').boundingBox();
+  await tacticsCdp.send('Input.dispatchTouchEvent', { type: 'touchStart', touchPoints: [{ id: 1, x: trigger.x + trigger.width / 2, y: trigger.y + trigger.height / 2 }] });
+  await tactical.waitForFunction(() => document.querySelector('#concealmentStatus').textContent.startsWith('暴露'));
+  await tacticsCdp.send('Input.dispatchTouchEvent', { type: 'touchEnd', touchPoints: [] });
+  await tactical.waitForFunction(() => document.querySelector('#concealmentStatus').textContent === '隐蔽 · 首炮强化', null, { timeout: 20000 });
+  await tacticsContext.close();
   assert.deepEqual(errors, []);
-  console.log(JSON.stringify({ url, http: response.status(), singlePlayer: 'passed', boostAndCharge: 'passed', towerHud: 'passed', defaultStrongShake: 'passed', touchCancel: 'passed', transparentHud: 'passed', modes: ['classic', 'defense'], careerAndFactory: 'passed', fourVehiclePreviews: 'passed', oldProfileAndUnlock: 'passed', vehiclePersistence: 'passed', independentNetworkVehicles: 'passed', tacticalMap: 'passed', pageZoomGuard: 'passed', difficultySync: 'passed', largeMapSync: 'passed', scoutingHud: 'passed', pickupFeedback: 'passed', mobileLayout: 'passed', publicWebRTC: 'passed', pageErrors: errors }));
+  console.log(JSON.stringify({ url, http: response.status(), singlePlayer: 'passed', boostAndCharge: 'passed', towerHud: 'passed', defaultStrongShake: 'passed', touchCancel: 'passed', transparentHud: 'passed', modes: ['classic', 'defense'], careerAndFactory: 'passed', fourVehiclePreviews: 'passed', oldProfileAndUnlock: 'passed', vehiclePersistence: 'passed', independentNetworkVehicles: 'passed', weakpointInstructions: 'passed', grassAmbushAndRearm: 'passed', tacticalMap: 'passed', pageZoomGuard: 'passed', difficultySync: 'passed', largeMapSync: 'passed', scoutingHud: 'passed', pickupFeedback: 'passed', mobileLayout: 'passed', publicWebRTC: 'passed', pageErrors: errors }));
 } finally {
   await browser.close();
 }

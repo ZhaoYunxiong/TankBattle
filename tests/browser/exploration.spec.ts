@@ -30,13 +30,13 @@ test('手机大地图切换、高草伏击和自由镜头侦察边界', async ({
   };
   await drive('x', -8);
   await drive('z', 30);
-  await expect(page.locator('#concealmentStatus')).toHaveText('隐蔽');
+  await expect(page.locator('#concealmentStatus')).toHaveText('隐蔽 · 首炮强化');
   await page.screenshot({ path: 'artifacts/grass-ambush-mobile.png' });
   const fire = (await page.locator('#fireButton').boundingBox())!;
   await cdp.send('Input.dispatchTouchEvent', { type: 'touchStart', touchPoints: [{ id: 2, x: fire.x + fire.width / 2, y: fire.y + fire.height / 2 }] });
   await expect(page.locator('#concealmentStatus')).toContainText('暴露');
   await cdp.send('Input.dispatchTouchEvent', { type: 'touchEnd', touchPoints: [] });
-  await expect(page.locator('#concealmentStatus')).toHaveText('隐蔽', { timeout: 15000 });
+  await expect(page.locator('#concealmentStatus')).toHaveText('隐蔽 · 首炮强化', { timeout: 15000 });
   await page.locator('#freeLook').tap();
   await cdp.send('Input.dispatchTouchEvent', { type: 'touchStart', touchPoints: [{ id: 2, x: 470, y: 190 }] });
   await cdp.send('Input.dispatchTouchEvent', { type: 'touchMove', touchPoints: [{ id: 2, x: 700, y: 230 }] });

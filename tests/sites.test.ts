@@ -80,7 +80,7 @@ describe('占领、争夺、易主与维修', () => {
 describe('自动炮塔的预警、遮挡与战斗', () => {
   it('锁定后预警，再发射可躲避炮弹，普通命中不秒杀', () => {
     const { sim, p, site } = fixture(); site.team = 'enemy'; site.capturable = false; site.angle = Math.PI;
-    p.z = 13; p.shield = 0;
+    p.z = 13; p.shield = 0; p.angle = Math.atan2(site.x - p.x, site.z - p.z);
     advance(sim, 0.7); expect(site.warning).toBeGreaterThan(0); expect(sim.state.shells).toHaveLength(0);
     advance(sim, 0.35); expect(sim.state.events.some(e => e.kind === 'shot' && e.owner === 'site-' + site.id)).toBe(true);
     advance(sim, 0.6); expect(p.hp).toBe(104);

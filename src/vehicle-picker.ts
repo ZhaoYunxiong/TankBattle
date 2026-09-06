@@ -59,6 +59,7 @@ export class VehiclePicker {
     const stats = [['耐久', v.hp], ['普通炮', v.damage + ' 伤害'], ['装填', v.reload.toFixed(2) + ' 秒'], ['移速', v.speed.toFixed(1) + ' 米/秒'], ['满蓄力', v.chargeDamage + ' / ' + v.chargeSeconds + ' 秒'], ['加速续航', (100 / v.boostDrain).toFixed(1) + ' 秒']];
     el('vehicleStats').innerHTML = stats.map(([name, value]) => `<div><dt>${name}</dt><dd>${value}</dd></div>`).join('');
     el('vehicleDetail').textContent = this.kind === 'engineer' ? `脱战 ${ENGINEER.peace} 秒后，${ENGINEER.range} 米内每 ${ENGINEER.cooldown} 秒自修 ${ENGINEER.self}，维修友军或友塔 ${ENGINEER.ally}。双方须脱战且无遮挡，多车维修不叠加。` : this.kind === 'heavy' ? '正面防护按车身朝向判定。装填较慢，利用掩体准备下一炮。' : this.kind === 'scout' ? '轻型更容易穿过狭窄空隙，适合灵活游走，注意较低的耐久。' : '沿用原有驾驶手感。数值已计入工厂升级；地形、受损和道具会影响战斗表现。';
+    el('vehicleDetail').textContent += ' 车身后方 120° 为弱点，受到额外 25% 伤害。';
     el('vehicleWallet').textContent = `工厂金币 ${p.coins} · ${owned ? '已永久解锁' : '解锁后所有对局可用'}`;
     const button = el<HTMLButtonElement>('selectVehicle');
     button.textContent = this.busy ? '正在准备…' : owned ? '选用这辆坦克' : p.coins < v.cost ? `还差 ${v.cost - p.coins} 金币` : `解锁并选用 · ${v.cost} 金币`;

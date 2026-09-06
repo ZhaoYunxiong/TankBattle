@@ -46,10 +46,18 @@ export class BattleAudio {
     const start = ctx.currentTime;
     const gain = ctx.createGain();
     gain.connect(ctx.destination);
-    const duration = kind === 'destroy' ? material === 'tank' || material === 'base' ? 0.85 : 0.4 : material === 'charged' ? 0.3 : kind === 'pickup' ? 0.22 : 0.13;
+    const impact = kind === 'hit' && ['armor', 'weakpoint', 'shield'].includes(material ?? '');
+    const duration = impact ? 0.19 : kind === 'destroy' ? material === 'tank' || material === 'base' ? 0.85 : 0.4 : material === 'charged' ? 0.3 : kind === 'pickup' ? 0.22 : 0.13;
     gain.gain.setValueAtTime(Math.max(0.001, volume * (kind === 'destroy' ? 0.15 : material === 'charged' ? 0.12 : 0.075)), start);
     gain.gain.exponentialRampToValueAtTime(0.001, start + duration);
-    if (kind === 'pickup' || kind === 'wave') {
+    if (impact) {
+      // 装甲是清脆金属声，弱点是低沉破裂声，护盾用柔和的电子音。
+      const tone = ctx.createOscillator();
+      tone.type = material === 'weakpoint' ? 'sawtooth' : material === 'armor' ? 'triangle' : 'sine';
+      tone.frequency.setValueAtTime(material === 'armor' ? 1550 : material === 'weakpoint' ? 240 : 720, start);
+      tone.frequency.exponentialRampToValueAtTime(material === 'armor' ? 540 : material === 'weakpoint' ? 65 : 400, start + duration);
+      tone.connect(gain); tone.start(start); tone.stop(start + duration);
+    } else if (kind === 'pickup' || kind === 'wave') {
       const oscillator = ctx.createOscillator();
       oscillator.type = 'sine';
       oscillator.frequency.setValueAtTime(kind === 'pickup' ? 660 : 330, start);

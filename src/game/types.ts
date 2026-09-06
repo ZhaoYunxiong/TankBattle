@@ -46,6 +46,7 @@ export interface Tank {
   recoil: number;
   repairCooldown: number;
   combatUntil: number;
+  ambushCharge: number;
   warning: number;
   exposedUntil: number;
   lives: number;
@@ -90,6 +91,7 @@ export interface Shell {
   damage: number;
   life: number;
   power?: number;
+  ambush?: boolean;
 }
 
 export interface Drop {
@@ -122,6 +124,8 @@ export interface Site {
   target: string | null;
 }
 
+export type ImpactKind = 'normal' | 'armor' | 'weakpoint' | 'shield';
+
 export interface BattleEvent {
   id: number;
   kind: 'shot' | 'hit' | 'destroy' | 'pickup' | 'wave' | 'capture' | 'repair';
@@ -138,13 +142,16 @@ export interface BattleEvent {
   sourceX?: number;
   sourceZ?: number;
   charge?: number;
+  ambush?: boolean;
+  impact?: ImpactKind;
+  victim?: string;
 }
 
 export interface Scar { id: number; x: number; z: number; radius: number; kind: 'crater' | 'impact'; surface: 'earth' | 'stone' | 'bridge'; rotation: number }
 
 export interface Ping { owner: string; x: number; z: number; until: number }
 
-export const PROTOCOL_VERSION = 11;
+export const PROTOCOL_VERSION = 12;
 
 export interface State {
   version: typeof PROTOCOL_VERSION;

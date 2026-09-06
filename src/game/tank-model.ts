@@ -79,8 +79,8 @@ export function buildTankModel(t: Pick<Tank, 'id' | 'team' | 'kind' | 'color'>, 
       const aerial = kit.cylinder('scout-aerial', 0.02, 0.025, 1.1, '#4b594c', turret);
       aerial.position.set(-0.45, 1, -0.35);
     }
-    if (t.team === 'player' && t.kind === 'heavy') {
-      const armor = kit.box('heavy-front-armor', 1.7, 0.48, 0.32, '#466a62', chassis);
+    if (t.kind === 'heavy') {
+      const armor = kit.box('heavy-front-armor', 1.7, 0.48, 0.32, t.team === 'player' ? '#466a62' : '#965849', chassis);
       armor.position.set(0, 0.61, 1.01); armor.rotation.x = -0.22;
       top.scaling.set(1.08, 1.2, 1.05);
       barrel.scaling.x = barrel.scaling.z = 1.4;

@@ -81,12 +81,12 @@ describe('四种可驾驶车型', () => {
     expect(sim.state.shells.every(s => s.damage === Math.round(VEHICLES[kind].damage * 0.6))).toBe(true);
   });
 
-  it('重装正面按车身朝向减伤，与护盾计算兼容，背面没有正面保护', () => {
+  it('重装正面按车身朝向减伤，与护盾计算兼容，后部受到弱点增伤', () => {
     const { sim, player } = battle('heavy'); player.angle = 0; player.turret = Math.PI;
     hit(sim, player, 20); expect(player.hp).toBe(164);
-    hit(sim, player, 20, 27); expect(player.hp).toBe(144);
+    hit(sim, player, 20, 27); expect(player.hp).toBe(139);
     player.buffs.armor = 10;
-    hit(sim, player, 20); expect(player.hp).toBe(138); expect(player.buffs.armor).toBe(0);
+    hit(sim, player, 20); expect(player.hp).toBe(133); expect(player.buffs.armor).toBe(0);
   });
 
   it('重炮与强化伤害不能单发击毁任何满血坦克，后续命中仍能正常击毁', () => {

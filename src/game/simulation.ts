@@ -12,6 +12,7 @@ import { attackSize, DIFFICULTIES, enemyLimit, MAP_PRESSURE, reserveSize, waveSi
 
 import { advanceCapture, createSites, SITE } from './sites';
 import { cleanTankKind, ENGINEER, isTankKind, tankRadius, VEHICLES, vehicleStats } from './vehicles';
+import { ambushReady, attackDamage, tankImpact, TACTICS } from './tactics';
 
 interface EnemyMemory {
   lastSeen?: { x: number; z: number };
@@ -128,7 +129,7 @@ export class Simulation {
 
   disconnect(id: string) {
     const t = this.state.tanks.find(t => t.id === id);
-    if (t) { t.connected = false; t.boosting = false; this.cancelCharge(t); this.inputs.delete(id); this.recoils.delete(id); }
+    if (t) { t.connected = false; t.boosting = false; t.ambushCharge = 0; this.cancelCharge(t); this.inputs.delete(id); this.recoils.delete(id); }
     if (this.state.phase === 'lobby') this.state.tanks = this.state.tanks.filter(t => t.id !== id);
     this.updateCampUpgrades();
   }
@@ -181,7 +182,7 @@ export class Simulation {
     const hp = team === 'player' ? VEHICLES[kind].hp : DIFFICULTIES[this.state.difficulty].hp[kind === 'engineer' ? 'standard' : kind];
     return {
       id, name, team, kind, color: 0, x: 0, z: 0, angle: 0, turret: 0, hp, maxHp: hp,
-      cooldown: 0, stamina: BOOST.capacity, boosting: false, boostLocked: false, charging: false, charge: 0, recoil: 0, repairCooldown: 0, combatUntil: 0,
+      cooldown: 0, stamina: BOOST.capacity, boosting: false, boostLocked: false, charging: false, charge: 0, recoil: 0, repairCooldown: 0, combatUntil: 0, ambushCharge: 0,
       warning: 0, exposedUntil: 0, lives: 2, respawn: 0, shield: 0, buffs: { rapid: 0, burst: 0, heal: 0, armor: 0 },
       score: 0, connected: true, ready: true, upgrades: emptyLoadout(), stats: { kills: 0, assists: 0, defenses: 0, baseDamage: 0, teamBonus: 0, objectives: 0, repairs: 0 },
     };
@@ -290,7 +291,7 @@ export class Simulation {
       t.shield = Math.max(0, t.shield - dt);
       t.buffs.rapid = Math.max(0, t.buffs.rapid - dt);
       if (t.hp <= 0) {
-        this.cancelCharge(t); t.boosting = false; this.recoils.delete(t.id);
+        this.cancelCharge(t); t.boosting = false; t.ambushCharge = 0; this.recoils.delete(t.id);
         if (t.team === 'player' && t.respawn > 0) {
           t.respawn -= dt;
           if (t.respawn <= 0) {
@@ -329,6 +330,7 @@ export class Simulation {
       } else this.move(t, input.moveX * speed * slope * (waterAt(t, this.map) === 'shallow' ? 0.6 : 1) * (boost ? BOOST.speed : 1) * dt,
         input.moveZ * speed * slope * (waterAt(t, this.map) === 'shallow' ? 0.6 : 1) * (boost ? BOOST.speed : 1) * dt);
       t.boosting = !!boost && !kick && Math.hypot(t.x - x, t.z - z) > 0.001;
+      t.ambushCharge = concealed(t, s) ? Math.min(TACTICS.ambushSeconds, t.ambushCharge + dt) : 0;
       if (t.boosting) {
         t.stamina = Math.max(0, t.stamina - vehicle.boostDrain * dt); this.staminaRest.set(t.id, s.time);
         if (t.stamina <= 0.001) { t.stamina = 0; t.boostLocked = true; t.boosting = false; }
@@ -626,18 +628,21 @@ export class Simulation {
   }
 
   private fire(t: Tank, damage: number, power?: number) {
-    t.exposedUntil = this.state.time + 5;
+    const ambush = ambushReady(t, this.state);
+    t.ambushCharge = 0;
+    t.exposedUntil = this.state.time + TACTICS.revealSeconds;
     t.combatUntil = this.state.time + ENGINEER.peace;
-    const spread = damageHandling(t.hp, t.maxHp).spread + (t.team === 'enemy' ? 0.035 : 0);
+    const spread = (damageHandling(t.hp, t.maxHp).spread + (t.team === 'enemy' ? 0.035 : 0)) * (ambush ? TACTICS.ambushSpread : 1);
     const angle = t.turret + (this.random() - 0.5) * spread * 2;
     const speed = power === undefined ? 27 : 32 + power * 8;
     const slope = shotSlope(this.state, t, angle);
     // 从炮塔中心开始做连续碰撞检测，避免炮口穿过近距离墙体后凭空射到墙后。
     this.state.shells.push({
       id: this.nextId++, owner: t.id, team: t.team, x: t.x, y: groundHeight(t.x, t.z, this.map) + SHOT_HEIGHT, z: t.z,
-      vx: Math.sin(angle) * speed, vy: slope * speed, vz: Math.cos(angle) * speed, damage, life: 2, ...(power === undefined ? {} : { power }),
+      vx: Math.sin(angle) * speed, vy: slope * speed, vz: Math.cos(angle) * speed, damage, life: 2, ...(power === undefined ? {} : { power }), ...(ambush ? { ambush: true } : {}),
     });
     this.event('shot', t.x, t.z, 0.6, t.id);
+    if (ambush) this.state.events.at(-1)!.ambush = true;
     if (power !== undefined) {
       Object.assign(this.state.events.at(-1)!, { charge: power });
       const recoil = CHARGE.recoil * (0.25 + power * 0.75);
@@ -671,6 +676,9 @@ export class Simulation {
 
   private hit(shell: Shell, target: ShotTarget) {
     this.event('hit', shell.x, shell.z, 0.7, shell.owner, undefined, shell.y);
+    const hitEvent = this.state.events.at(-1)!;
+    if (shell.ambush) hitEvent.ambush = true;
+    const enhancedDamage = attackDamage(shell);
     if (shell.power !== undefined) Object.assign(this.state.events.at(-1)!, { charge: shell.power });
     const shooter = this.state.tanks.find(t => t.id === shell.owner);
     if (shooter) Object.assign(this.state.events.at(-1)!, { sourceX: shooter.x, sourceZ: shooter.z });
@@ -679,7 +687,7 @@ export class Simulation {
     if (target.type === 'tower') {
       const site = this.state.sites.find(s => s.id === target.id)!;
       if (site.hp <= 0 || site.team === shell.team) return;
-      site.hp = Math.max(0, site.hp - shell.damage);
+      site.hp = Math.max(0, site.hp - enhancedDamage);
       this.siteCombat.set(site.id, this.state.time + ENGINEER.peace);
       const key = 'site-' + site.id;
       if (shooter?.team === 'player' && site.team === 'enemy') {
@@ -701,10 +709,10 @@ export class Simulation {
       const enemy = target.id === 'enemy';
       const key = enemy ? 'enemyBaseHp' : 'baseHp';
       if (this.state[key] <= 0) return;
-      const damage = Math.min(this.state[key], shell.damage);
+      const damage = Math.min(this.state[key], enhancedDamage);
       if (enemy && shooter?.team === 'player') { shooter.stats.baseDamage += damage; shooter.score += Math.round(damage * 0.5); }
       if (!enemy) this.baseHitAt = this.state.time;
-      this.state[key] = Math.max(0, this.state[key] - shell.damage);
+      this.state[key] = Math.max(0, this.state[key] - enhancedDamage);
       if (this.state[key] === 0) {
         const base = enemy ? this.map.enemyBase : this.map.base;
         this.event('destroy', base.x, base.z, 3);
@@ -717,7 +725,7 @@ export class Simulation {
       Object.assign(this.state.events.at(-1)!, { material: o.kind });
       // 双方都不会误伤本方围墙，但可以炸开敌方阵地。
       if (o.kind === 'wall' && shell.team === (o.team ?? 'player')) return;
-      o.hp = Math.max(0, o.hp - shell.damage);
+      o.hp = Math.max(0, o.hp - enhancedDamage);
       if (o.hp === 0) {
         if (o.kind === 'tree') o.fallenAt = this.state.time;
         this.event('destroy', o.x, o.z, o.kind === 'tree' ? 1.1 : 1.8);
@@ -726,14 +734,14 @@ export class Simulation {
     } else {
       const t = this.state.tanks.find(t => t.id === target.id)!;
       t.combatUntil = this.state.time + ENGINEER.peace;
-      if (t.shield > 0) return;
+      t.ambushCharge = 0;
+      Object.assign(hitEvent, { target: 'tank', victim: t.id });
+      if (t.shield > 0) { hitEvent.impact = 'shield'; return; }
       const cover = terrainCover(t, this.state);
       // 环境掩护先减伤，再扣除护盾耐久；多种环境只取最强一项。
-      const incoming = Math.atan2(-shell.vx, -shell.vz);
-      const front = t.team === 'player' && t.kind === 'heavy' && Math.hypot(shell.vx, shell.vz) > 0.001 && Math.abs(angleDiff(incoming, t.angle)) <= Math.PI / 3;
-      // 单发对坦克的伤害最多为其满耐久减一；重炮也不能直接击毁满血目标。
-      const damage = Math.min(Math.max(0, shell.damage), Math.max(0, t.maxHp - 1)) * (front ? 0.8 : 1) * (1 - (cover ? COVER_REDUCTION[cover] : 0));
+      const { impact, damage } = tankImpact(t, shell, cover ? COVER_REDUCTION[cover] : 0);
       const absorbed = Math.min(t.buffs.armor, damage);
+      hitEvent.impact = absorbed >= damage && absorbed > 0 ? 'shield' : impact;
       t.buffs.armor -= absorbed;
       t.hp = Math.max(0, t.hp - (damage - absorbed));
       if (t.team === 'enemy' && shooter?.team === 'player') {
