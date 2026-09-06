@@ -1,8 +1,9 @@
-import { mapFor, inRegion, waterAt, roadDistance } from './maps';
+import { mapFor, inRegion, waterAt, roadDistance, riverSection, type River } from './maps';
 import { Color3, Color4 } from '@babylonjs/core/Maths/math.color';
 import { Matrix, Vector3 } from '@babylonjs/core/Maths/math.vector';
 import { DirectionalLight } from '@babylonjs/core/Lights/directionalLight';
 import { HemisphericLight } from '@babylonjs/core/Lights/hemisphericLight';
+import { PointLight } from '@babylonjs/core/Lights/pointLight';
 import { Engine } from '@babylonjs/core/Engines/engine';
 import { FreeCamera } from '@babylonjs/core/Cameras/freeCamera';
 import { Mesh } from '@babylonjs/core/Meshes/mesh';
@@ -13,7 +14,7 @@ import '@babylonjs/core/Lights/Shadows/shadowGeneratorSceneComponent';
 import { StandardMaterial } from '@babylonjs/core/Materials/standardMaterial';
 import { TransformNode } from '@babylonjs/core/Meshes/transformNode';
 import { VertexData } from '@babylonjs/core/Meshes/mesh.vertexData';
-import { angleDiff, clamp, COLORS, distance, type BattleEvent, type GameMode, type Obstacle, type State, type Tank } from './types';
+import { angleDiff, clamp, COLORS, distance, type BattleEvent, type GameMode, type Obstacle, type Scar, type State, type Tank } from './types';
 import { seededRandom, segmentCircle } from './world';
 import { BattleAudio } from './audio';
 import { CAMERA } from './camera';
@@ -41,6 +42,8 @@ export class BattleRenderer {
 
   shakeEnabled = true;
 
+  shakeStrength = 1;
+
   private shadows: ShadowGenerator;
 
   private materials = new Map<string, StandardMaterial>();
@@ -65,7 +68,21 @@ export class BattleRenderer {
 
   private ripples: Mesh[] = [];
 
+  private eddies: Mesh[] = [];
+
   private fallen = new Map<number, number>();
+
+  private settledTrees = new Set<number>();
+
+  private scars = new Map<number, Mesh>();
+
+  private flash: PointLight;
+
+  private pulses: { mesh: Mesh; age: number; size: number; water: boolean }[] = [];
+
+  private cameraKick = Vector3.Zero();
+
+  private matchId = '';
 
   private tracks: { mesh: Mesh; life: number }[] = [];
 
@@ -94,13 +111,15 @@ export class BattleRenderer {
     this.scene = new Scene(this.engine);
     this.scene.clearColor = new Color4(0.84, 0.87, 0.83, 1);
     this.scene.ambientColor = Color3.FromHexString('#d6ddcf');
+    this.flash = new PointLight('explosion-flash', Vector3.Zero(), this.scene);
+    this.flash.diffuse = Color3.FromHexString('#ffd9a4'); this.flash.intensity = 0; this.flash.range = 22;
     this.scene.fogMode = Scene.FOGMODE_LINEAR;
     this.scene.fogColor = Color3.FromHexString('#d6dfd8');
     this.scene.fogStart = 60;
     this.scene.fogEnd = 145;
     this.camera = new FreeCamera('camera', new Vector3(18, 25, 36), this.scene);
     this.camera.minZ = 0.15;
-    this.camera.maxZ = 220;
+    this.camera.maxZ = 420;
     this.camera.fov = 0.85;
     this.camera.setTarget(Vector3.Zero());
     const ambient = new HemisphericLight('sky', new Vector3(0, 1, 0), this.scene);
@@ -117,6 +136,7 @@ export class BattleRenderer {
     this.shadows.darkness = 0.3;
     this.terrain = new TransformNode('landscape', this.scene);
     this.setQuality('auto');
+    this.scene.onDisposeObservable.add(() => this.audio.dispose());
     window.addEventListener('resize', () => this.engine.resize());
   }
 
@@ -160,15 +180,19 @@ export class BattleRenderer {
     this.terrain.dispose();
     this.terrain = new TransformNode('landscape', this.scene);
     this.obstacles.clear();
-    this.flags = []; this.grassPatches = []; this.clouds = []; this.ripples = []; this.fallen.clear();
+    this.flags = []; this.grassPatches = []; this.clouds = []; this.ripples = []; this.eddies = []; this.fallen.clear(); this.settledTrees.clear(); this.scars.clear();
+    for (const p of this.pulses) p.mesh.dispose();
+    this.pulses = []; this.flash.intensity = 0; this.shake = 0; this.cameraKick.setAll(0);
     for (const mark of this.tracks) mark.mesh.dispose();
     this.tracks = [];
     for (const visual of this.tankVisuals.values()) visual.root.dispose();
     this.tankVisuals.clear();
     this.camps.clear();
     this.seed = state.seed;
+    this.matchId = state.matchId;
     this.map = mapFor(state.mapSize);
     this.mode = state.mode;
+    this.scene.fogStart = 110; this.scene.fogEnd = Math.hypot(this.map.arena.x * 2, this.map.arena.z * 2) + 35;
     this.seenEvent = state.events.at(-1)?.id ?? 0;
     for (const p of this.particles) p.mesh.dispose();
     this.particles = [];
@@ -252,14 +276,19 @@ export class BattleRenderer {
 
   private buildNature(random: () => number) {
     for (const river of this.map.rivers) {
-      const water = this.box(river.kind + '-river', river.width, 0.025, river.depth, river.kind === 'deep' ? '#629b9f' : '#9dc5bb', this.terrain);
-      water.position.set(river.x, 0.025, river.z);
+      this.buildRiver(river);
       const horizontal = river.width > river.depth;
-      const count = Math.ceil(Math.max(river.width, river.depth) / 8);
+      const count = Math.ceil(Math.max(river.width, river.depth) / 4);
       for (let i = 0; i < count; i++) {
-        const ripple = this.box('water-current', horizontal ? 2.4 : 0.12, 0.014, horizontal ? 0.12 : 2.4, '#d2e6d7', this.terrain);
-        ripple.position.set(river.x + (horizontal ? (i / count - 0.5) * river.width : (random() - 0.5) * river.width * 0.6), 0.05, river.z + (horizontal ? (random() - 0.5) * river.depth * 0.6 : (i / count - 0.5) * river.depth));
+        const length = 1.2 + random() * 2.6;
+        const ripple = this.box('water-current', horizontal ? length : 0.11, 0.014, horizontal ? 0.11 : length, '#deefdc', this.terrain);
+        ripple.metadata = { river, start: i / count, lane: (random() - 0.5) * 1.5, speed: 1.4 + random() * 0.9 };
         this.ripples.push(ripple);
+      }
+      for (let along = -Math.max(river.width, river.depth) / 2 + 1; along < Math.max(river.width, river.depth) / 2; along += 7) for (const side of [-1, 1]) {
+        const section = riverSection(river, along), cross = section.offset + side * (section.half - 0.1);
+        const foam = this.box('river-bank-foam', horizontal ? 2.4 : 0.25, 0.025, horizontal ? 0.25 : 2.4, '#d5e3c8', this.terrain);
+        foam.position.set(river.x + (horizontal ? along : cross), 0.068, river.z + (horizontal ? cross : along)); foam.rotation.y = Math.sin(along) * 0.1;
       }
       // 浅河裸露的卵石提示可以涉水；深河使用更深的青色。
       if (river.kind === 'shallow') for (let i = 0; i < 12; i++) {
@@ -279,6 +308,11 @@ export class BattleRenderer {
       for (const end of [-1, 1]) for (const side of [-1, 1]) {
         const post = this.box('bridge-post', 0.35, 0.8, 0.35, '#b9aa8f', this.terrain);
         post.position.set(bridge.x + (horizontal ? end * (bridge.width / 2 - 0.3) : side * (bridge.width / 2 - 0.25)), 0.4, bridge.z + (horizontal ? side * (bridge.depth / 2 - 0.25) : end * (bridge.depth / 2 - 0.3)));
+        const whirl = MeshBuilder.CreateTorus('bridge-eddy', { diameter: 0.8, thickness: 0.06, tessellation: 12 }, this.scene);
+        whirl.parent = this.terrain; whirl.material = this.material('#dcebd7'); whirl.position.copyFrom(post.position); whirl.position.y = 0.07;
+        if (horizontal) whirl.position.z += side * 0.8; else whirl.position.x += side * 0.8;
+        whirl.scaling.z = 0.7;
+        this.eddies.push(whirl);
       }
     }
     for (const patch of this.map.grass) {
@@ -311,9 +345,94 @@ export class BattleRenderer {
     }
   }
 
+  private buildRiver(river: River) {
+    const horizontal = river.width > river.depth, length = Math.max(river.width, river.depth);
+    const positions: number[] = [], indices: number[] = [], colors: number[] = [], normals: number[] = [];
+    const rows = Math.ceil(length / 2);
+    for (let i = 0; i <= rows; i++) {
+      const along = (i / rows - 0.5) * length, section = riverSection(river, along);
+      for (let lane = 0; lane <= 4; lane++) {
+        const cross = section.offset + (lane / 2 - 1) * section.half;
+        positions.push(river.x + (horizontal ? along : cross), 0.048, river.z + (horizontal ? cross : along));
+        const color = Color3.FromHexString(lane === 0 || lane === 4 ? '#93c6b6' : river.kind === 'deep' ? lane === 2 ? '#397f96' : '#529eac' : lane === 2 ? '#75b5b0' : '#96c9bb');
+        colors.push(color.r, color.g, color.b, 1);
+      }
+    }
+    for (let i = 0; i < rows; i++) for (let lane = 0; lane < 4; lane++) {
+      const a = i * 5 + lane;
+      if (horizontal) indices.push(a, a + 5, a + 1, a + 1, a + 5, a + 6);
+      else indices.push(a, a + 1, a + 5, a + 1, a + 6, a + 5);
+    }
+    VertexData.ComputeNormals(positions, indices, normals);
+    const mesh = new Mesh(river.kind + '-river', this.scene), data = new VertexData();
+    data.positions = positions; data.indices = indices; data.colors = colors; data.normals = normals; data.applyToMesh(mesh);
+    mesh.material = this.material('#ffffff'); mesh.parent = this.terrain; mesh.receiveShadows = true;
+  }
+
+  private pulse(x: number, z: number, size: number, water = false) {
+    if (this.pulses.length >= (this.lowQuality ? 12 : 24)) return;
+    const mesh = MeshBuilder.CreateTorus(water ? 'water-wake' : 'blast-wave', { diameter: 1, thickness: water ? 0.045 : 0.13, tessellation: 20 }, this.scene);
+    mesh.material = this.material(water ? '#d6f0e7' : '#e3cda8');
+    mesh.position.set(x, groundHeight(x, z, this.map) + (water ? 0.1 : 0.25), z);
+    this.pulses.push({ mesh, age: 0, size, water });
+  }
+
+  private buildScar(scar: Scar) {
+    const positions: number[] = [], indices: number[] = [], colors: number[] = [], normals: number[] = [];
+    const random = seededRandom(scar.id), sides = 20;
+    const bridge = scar.surface === 'bridge' ? this.map.bridges.find(b => inRegion(scar, b)) : undefined;
+    const ratios = [0, 0.52, 0.78, 1, 1.13];
+    const rim = scar.kind === 'crater' && scar.surface === 'earth';
+    const palette = rim ? ['#454b42', '#555548', '#95836b', '#b09c7c', '#8f9475'] : ['#424c46', '#535d51', '#6b715e', '#80846c', '#929779'];
+    const jitter = Array.from({ length: sides }, () => 0.86 + random() * 0.24);
+    for (let ring = 0; ring < ratios.length; ring++) for (let side = 0; side < sides; side++) {
+      const a = side / sides * Math.PI * 2 + scar.rotation;
+      let x = scar.x + Math.sin(a) * scar.radius * ratios[ring] * jitter[side];
+      let z = scar.z + Math.cos(a) * scar.radius * ratios[ring] * jitter[side];
+      if (bridge) { x = clamp(x, bridge.x - bridge.width / 2 + 0.04, bridge.x + bridge.width / 2 - 0.04); z = clamp(z, bridge.z - bridge.depth / 2 + 0.04, bridge.z + bridge.depth / 2 - 0.04); }
+      positions.push(x, (bridge ? 0.16 : groundHeight(x, z, this.map)) + 0.035 + (rim && ring === 2 ? scar.radius * 0.11 : ring === 3 ? 0.03 : 0), z);
+      const color = Color3.FromHexString(palette[ring]).scale(side % 3 === 0 ? 0.94 : 1);
+      colors.push(color.r, color.g, color.b, 1);
+    }
+    for (let ring = 0; ring < 4; ring++) for (let side = 0; side < sides; side++) {
+      const a = ring * sides + side, b = ring * sides + (side + 1) % sides;
+      indices.push(a, b, b + sides, a, b + sides, a + sides);
+    }
+    // 残片并入同一网格，弹坑保留整局而不持续占用粒子和物理预算。
+    if (scar.kind === 'crater') for (let i = 0; i < 4; i++) {
+      const x = scar.x + (random() - 0.5) * scar.radius, z = scar.z + (random() - 0.5) * scar.radius;
+      const y = (bridge ? 0.17 : groundHeight(x, z, this.map)) + 0.08, n = positions.length / 3;
+      positions.push(x - 0.18, y, z, x + 0.24, y, z, x, y + 0.15, z + 0.35);
+      indices.push(n, n + 1, n + 2); colors.push(0.27, 0.32, 0.29, 1, 0.35, 0.39, 0.35, 1, 0.4, 0.43, 0.35, 1);
+    }
+    VertexData.ComputeNormals(positions, indices, normals);
+    const mesh = new Mesh(scar.kind === 'crater' ? 'persistent-crater' : 'persistent-impact', this.scene), data = new VertexData();
+    data.positions = positions; data.indices = indices; data.colors = colors; data.normals = normals; data.applyToMesh(mesh);
+    mesh.material = this.material('#ffffff'); mesh.parent = this.terrain; mesh.receiveShadows = true;
+    this.scars.set(scar.id, mesh);
+  }
+
+  private settleTree(o: Obstacle, root: TransformNode) {
+    for (const mesh of root.getChildMeshes()) mesh.dispose();
+    root.rotation.set(0, o.rotation, 0); root.scaling.setAll(1);
+    const slope = groundSlope(o.x, o.z, this.map);
+    root.rotation.x = -Math.atan(slope.x * Math.sin(o.rotation) + slope.z * Math.cos(o.rotation));
+    const stump = this.cylinder('persistent-stump', 0.42, 0.55, 0.38, '#ac9271', root, 7); stump.position.y = 0.17;
+    const length = o.height * 0.7;
+    const log = this.cylinder('fallen-log', 0.2, 0.43, length, o.variant === 'birch' ? '#cdcdb3' : '#7c7059', root, 7);
+    log.rotation.x = Math.PI / 2; log.position.set(0, 0.23, length * 0.5);
+    if (o.variant !== 'dead') {
+      const leaves = MeshBuilder.CreateIcoSphere('fallen-leaves', { radius: 1, subdivisions: 0, flat: true }, this.scene);
+      leaves.parent = root; leaves.material = this.material(o.variant === 'birch' ? '#acaf77' : '#758b6b');
+      leaves.scaling.set(0.85 * (o.crown ?? 1), 0.25, 0.85); leaves.position.set(0, 0.35, length * 0.85);
+    }
+    this.settledTrees.add(o.id);
+  }
+
   private drivingTrail(tank: Tank) {
     if (waterAt(tank, this.map) === 'shallow') {
       this.particle(tank.x, groundHeight(tank.x, tank.z, this.map) + 0.2, tank.z, '#c8e5de', false, 0.18);
+      this.pulse(tank.x, tank.z, 1.1, true);
       return;
     }
     const x = tank.x - Math.sin(tank.angle), z = tank.z - Math.cos(tank.angle);
@@ -370,6 +489,8 @@ export class BattleRenderer {
         const crown = MeshBuilder.CreateIcoSphere('round-crown', { radius: 1, subdivisions: 1, flat: true }, this.scene);
         crown.parent = root; crown.material = this.material('#8da582');
         crown.scaling.set(1.25, (o.height - 1.2) / 2, 1.2); crown.position.y = (o.height + 1.2) / 2;
+        const side = MeshBuilder.CreateIcoSphere('round-crown-side', { radius: 1, subdivisions: 0, flat: true }, this.scene);
+        side.parent = root; side.material = this.material('#9daf7e'); side.scaling.set(1.1, o.height * 0.19, 0.9); side.position.set(0.65, o.height * 0.64, 0.2);
       } else if (o.variant === 'birch' || o.variant === 'dead') {
         for (const side of [-1, 1]) {
           const branch = this.cylinder('branch', 0.08, 0.2, 1.25, o.variant === 'birch' ? '#ddd9c3' : '#8c7860', root, 5);
@@ -384,6 +505,11 @@ export class BattleRenderer {
         crown.position.y = (o.height + 0.8) / 2;
         const top = this.cylinder('pine-top', 0, 1.6, o.height * 0.5, '#91a78c', root, 5);
         top.position.y = o.height * 0.75;
+      }
+      const palettes = o.variant === 'pine' ? ['#46776c', '#638675', '#54816c', '#78957d', '#5b7a60', '#8aa181'] : o.variant === 'birch' ? ['#abc387', '#c2ce95', '#8cae85', '#b1c494', '#c6b77a', '#d4c592'] : ['#6f986f', '#8eb084', '#819d67', '#a6b47b', '#b6a374', '#c6b080'];
+      for (const part of root.getChildMeshes()) if (part.name.includes('crown') || part.name === 'pine-top') {
+        part.material = this.material(palettes[((o.tone ?? 0) + (part.name.endsWith('top') ? 1 : 0)) % palettes.length]);
+        part.scaling.x *= o.crown ?? 1; part.scaling.z *= o.crown ?? 1;
       }
       root.rotation.y = o.rotation;
     } else if (o.kind === 'rock') {
@@ -405,7 +531,8 @@ export class BattleRenderer {
       root.rotation.y = o.rotation;
     }
     for (const mesh of root.getChildMeshes()) this.shadows.addShadowCaster(mesh);
-    root.setEnabled(o.hp > 0);
+    root.setEnabled(o.hp > 0 || o.kind === 'tree');
+    if (o.kind === 'tree' && o.hp <= 0) this.fallen.set(o.id, 2);
     this.obstacles.set(o.id, root);
   }
 
@@ -473,7 +600,7 @@ export class BattleRenderer {
     const m = smoke
       ? MeshBuilder.CreateIcoSphere('smoke', { radius: 0.3, subdivisions: 1, flat: true }, this.scene)
       : material === 'rock' ? MeshBuilder.CreateIcoSphere('stone-fragment', { radius: 0.22 + Math.random() * 0.24, subdivisions: 0, flat: true }, this.scene) : MeshBuilder.CreateBox(material === 'wall' ? 'wall-block' : 'debris', { size: material === 'wall' ? 0.45 : 0.12 + Math.random() * 0.14 }, this.scene);
-    m.material = this.material(color, !smoke && color === '#f5bc75');
+    m.material = this.material(color, color === '#f5bc75');
     m.position.set(x, y, z);
     m.rotation.set(Math.random() * 6, Math.random() * 6, Math.random() * 6);
     if (smoke && force < 1) m.scaling.setAll(0.45);
@@ -488,10 +615,18 @@ export class BattleRenderer {
   private handleEvent(event: BattleEvent, local?: Tank) {
     const d = local ? distance(event, local) : 25;
     const falloff = clamp(1 - d / 35, 0, 1);
-    this.audio.play(event.kind, falloff);
+    this.audio.play(event.kind, falloff, event.material ?? event.target);
     if (event.kind === 'destroy') {
-      this.shake = Math.min(0.7, this.shake + event.size * 0.2 * falloff);
+      const force = event.target === 'tank' ? event.owner === local?.id ? 1.5 : 1.15 : event.target === 'base' ? 1.4 : event.size * 0.2;
+      this.shake = Math.min(1.65, this.shake + force * falloff);
       if (event.material === 'tree' && event.obstacle !== undefined) this.fallen.set(event.obstacle, 0);
+      if (event.target) {
+        const water = !!waterAt(event, this.map);
+        this.pulse(event.x, event.z, event.size * 2.3, water);
+        this.flash.position.set(event.x, groundHeight(event.x, event.z, this.map) + 2.5, event.z);
+        this.flash.intensity = this.lowQuality ? 1.5 : 3;
+        for (let i = 0; i < 4; i++) this.particle(event.x, groundHeight(event.x, event.z, this.map) + 1, event.z, water ? '#d0e9e2' : '#f5bc75', true, 1.6);
+      }
       for (let i = 0; i < (this.lowQuality ? 8 : 18); i++) this.particle(event.x, groundHeight(event.x, event.z, this.map) + 1, event.z, event.material === 'tree' ? '#91a080' : event.material ? '#c8bba2' : i % 3 ? '#a59b84' : '#f5bc75', false, event.size, event.material);
       for (let i = 0; i < 5; i++) this.particle(event.x, groundHeight(event.x, event.z, this.map) + 1, event.z, '#9b9e90', true);
     } else if (event.kind === 'shot') {
@@ -502,10 +637,11 @@ export class BattleRenderer {
         const angle = tank.root.rotation.y + tank.turret.rotation.y;
         for (let i = 0; i < 4; i++) this.particle(muzzle.x + Math.sin(angle) * 2, muzzle.y + 0.2 - Math.sin(tank.gun.rotation.x) * 2, muzzle.z + Math.cos(angle) * 2, '#f5bc75');
       }
-      if (event.owner === local?.id) this.shake = Math.min(0.25, this.shake + 0.1);
+      if (event.owner === local?.id) this.shake = Math.max(this.shake, Math.min(0.25, this.shake + 0.1));
     } else if (event.kind === 'hit') {
-      this.shake = Math.min(0.4, this.shake + 0.08 * falloff);
+      this.shake = Math.max(this.shake, Math.min(0.4, this.shake + 0.08 * falloff));
       for (let i = 0; i < 4; i++) this.particle(event.x, event.y ?? groundHeight(event.x, event.z, this.map) + 0.7, event.z, '#edc788');
+      if (waterAt(event, this.map)) this.pulse(event.x, event.z, 1.7, true);
     } else if (event.kind === 'pickup') {
       for (let i = 0; i < 8; i++) this.particle(event.x, groundHeight(event.x, event.z, this.map) + 1, event.z, '#b5ddbc');
     }
@@ -513,19 +649,19 @@ export class BattleRenderer {
 
   render(state: State, localId: string, dt: number, menu: boolean) {
     this.elapsed += dt;
-    if (this.seed !== state.seed || this.mode !== state.mode || this.map.id !== state.mapSize) this.buildLandscape(state);
+    if (this.matchId !== state.matchId || this.seed !== state.seed || this.mode !== state.mode || this.map.id !== state.mapSize) this.buildLandscape(state);
     const lerp = 1 - Math.exp(-dt * 20);
     for (const o of state.obstacles) {
       const mesh = this.obstacles.get(o.id);
       if (mesh) {
-        mesh.setEnabled((o.hp > 0 || this.fallen.has(o.id)) && (o.team !== 'enemy' || state.enemyBaseDiscovered) && (menu || distance(o, this.camera.position) < (this.lowQuality ? 75 : 105)));
+        mesh.setEnabled((o.hp > 0 || o.kind === 'tree') && (o.team !== 'enemy' || state.enemyBaseDiscovered) && (menu || distance(o, this.camera.position) < (this.lowQuality ? 75 : 120)));
         mesh.scaling.y = o.hp > 0 ? 0.92 + o.hp / o.maxHp * 0.08 : 1;
-        if (o.kind === 'tree' && o.hp > 0) { mesh.rotation.z = Math.sin(this.elapsed * 1.3 + o.id) * 0.018; mesh.rotation.x = Math.cos(this.elapsed + o.id) * 0.012; }
-        if (this.fallen.has(o.id)) {
+        if (o.kind === 'tree' && o.hp > 0) { mesh.rotation.z = Math.sin(this.elapsed * 1.3 + o.id) * 0.018 + Math.sin(o.id) * 0.045; mesh.rotation.x = Math.cos(this.elapsed + o.id) * 0.012; }
+        if (o.kind === 'tree' && o.hp <= 0 && !this.fallen.has(o.id)) this.fallen.set(o.id, 0);
+        if (this.fallen.has(o.id) && !this.settledTrees.has(o.id)) {
           const age = this.fallen.get(o.id)! + dt; this.fallen.set(o.id, age);
           mesh.rotation.z = Math.min(1.5, age * age * 1.5);
-          for (const part of mesh.getChildMeshes()) part.visibility = clamp(2.5 - age, 0, 1);
-          if (age > 2.5) { mesh.setEnabled(false); this.fallen.delete(o.id); }
+          if (age > 1.2) this.settleTree(o, mesh);
         }
       }
     }
@@ -599,6 +735,11 @@ export class BattleRenderer {
     }
     for (const [id, root] of this.drops) if (!state.drops.some(d => d.id === id)) { root.dispose(); this.drops.delete(id); }
     const local = state.tanks.find(t => t.id === localId);
+    this.audio.ambience(!menu && !!local && local.hp > 0 ? this.tankVisuals.get(localId)?.speed ?? 0 : 0, !menu && !!local && this.map.rivers.some(r => Math.abs(r.width > r.depth ? local.z - r.z : local.x - r.x) < Math.min(r.width, r.depth) / 2 + 12));
+    for (const scar of state.scars) {
+      if (!this.scars.has(scar.id)) this.buildScar(scar);
+      this.scars.get(scar.id)!.setEnabled(distance(scar, this.camera.position) < (this.lowQuality ? 80 : 140));
+    }
     if (!menu) for (const event of state.events) if (event.id > this.seenEvent) this.handleEvent(event, local);
     if (state.events.length) this.seenEvent = state.events[state.events.length - 1].id;
     this.smokeClock += dt;
@@ -630,7 +771,16 @@ export class BattleRenderer {
       camp.beacon.rotation.y += dt * 0.7;
       camp.beacon.setEnabled(hp > 0);
     }
-    this.shake = Math.max(0, this.shake - dt * 1.3);
+    this.shake *= Math.exp(-dt * 6);
+    this.flash.intensity *= Math.exp(-dt * 13);
+    for (const p of this.pulses) {
+      p.age += dt; const life = p.water ? 1.15 : 0.65;
+      p.mesh.scaling.setAll(0.6 + p.age / life * p.size);
+      p.mesh.visibility = (1 - p.age / life) * (p.water ? 0.55 : 0.4);
+      if (p.age >= life) p.mesh.dispose();
+    }
+    this.pulses = this.pulses.filter(p => !p.mesh.isDisposed());
+    this.camera.position.subtractInPlace(this.cameraKick); this.cameraKick.setAll(0);
     if (menu) {
       const a = 0.42 + Math.sin(this.elapsed * 0.045) * 0.15;
       this.camera.position.set(Math.sin(a) * 54, 36, Math.cos(a) * 58 + 8);
@@ -662,8 +812,9 @@ export class BattleRenderer {
       this.camera.setTarget(target);
       this.camera.fov = portrait ? 1.04 : 0.85;
       if (this.shakeEnabled) {
-        this.camera.position.x += (Math.random() - 0.5) * this.shake;
-        this.camera.position.y += (Math.random() - 0.5) * this.shake;
+        const kick = this.shake * this.shakeStrength;
+        this.cameraKick.set(Math.sin(this.elapsed * 79) * kick * 0.42, Math.sin(this.elapsed * 97 + 1) * kick * 0.32, Math.cos(this.elapsed * 71) * kick * 0.2);
+        this.camera.position.addInPlace(this.cameraKick);
       }
       // 只淡化确实位于镜头和坦克之间的树冠。
       for (const o of state.obstacles) if (o.kind === 'tree' && o.hp > 0) {
@@ -673,7 +824,15 @@ export class BattleRenderer {
     }
     for (const flag of this.flags) { flag.rotation.y = Math.sin(this.elapsed * 3 + flag.position.x) * 0.18; flag.scaling.z = 1 + Math.sin(this.elapsed * 4) * 0.12; }
     for (const grass of this.grassPatches) grass.rotation.z = Math.sin(this.elapsed * 1.7 + grass.position.x) * 0.014;
-    for (const ripple of this.ripples) ripple.visibility = 0.2 + (Math.sin(this.elapsed * 1.5 + ripple.position.x + ripple.position.z) + 1) * 0.18;
+    for (const ripple of this.ripples) {
+      const { river, start, lane, speed } = ripple.metadata as { river: River; start: number; lane: number; speed: number };
+      const horizontal = river.width > river.depth, length = Math.max(river.width, river.depth);
+      const along = ((start * length + this.elapsed * speed) % length) - length / 2;
+      const section = riverSection(river, along), cross = section.offset + lane * section.half;
+      ripple.position.set(river.x + (horizontal ? along : cross), 0.079, river.z + (horizontal ? cross : along));
+      ripple.visibility = 0.36 + Math.sin(this.elapsed * 2 + start * 8) * 0.15;
+    }
+    for (const eddy of this.eddies) eddy.rotation.y += dt * 0.7;
     for (let i = 0; i < this.clouds.length; i++) {
       const cloud = this.clouds[i];
       cloud.position.x = ((this.elapsed * 1.1 + i * 47) % (this.map.arena.x * 2)) - this.map.arena.x;

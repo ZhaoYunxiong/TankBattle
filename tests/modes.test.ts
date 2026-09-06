@@ -43,7 +43,9 @@ describe('经典攻防与防守模式', () => {
       expect(sim.state.enemyBaseHp).toBe(360 - shot * 20);
       expect(sim.state.phase).toBe(shot < 18 ? 'battle' : 'won');
     }
-    expect(player.score).toBe(1000);
+    expect(player.stats.baseDamage).toBe(360);
+    expect(player.stats.teamBonus).toBe(800);
+    expect(player.score).toBe(180 + 250 + 800);
     expect(sim.state.events.filter(e => e.kind === 'destroy' && e.z === ENEMY_BASE.z)).toHaveLength(1);
     const time = sim.state.time;
     sim.step(1 / 30);

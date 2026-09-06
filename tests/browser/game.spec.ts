@@ -131,6 +131,10 @@ test('手机创建房间，第二位玩家通过真实 WebRTC 同步战场', asy
   const guest = await guestContext.newPage();
   // 使用确定超过旧 JSON 通道上限的大地图，覆盖完整战场快照的传输回归。
   await host.addInitScript(() => { Math.random = () => 47 / 0x7fffffff; });
+  for (const [page, upgrades, coins] of [
+    [host, { armor: 1, mobility: 0, reload: 0, baseArmor: 1, repair: 0 }, 700],
+    [guest, { armor: 0, mobility: 0, reload: 1, baseArmor: 2, repair: 1 }, 250],
+  ] as const) await page.addInitScript(({ upgrades, coins }) => localStorage.setItem('tb-profile-v1', JSON.stringify({ version: 1, id: 'network-test', honor: 2000, coins, earned: 1000, battles: 0, wins: 0, upgrades, records: [], settled: [] })), { upgrades, coins });
   const errors: string[] = [];
   host.on('pageerror', e => errors.push(e.message));
   guest.on('pageerror', e => errors.push(e.message));
@@ -158,12 +162,16 @@ test('手机创建房间，第二位玩家通过真实 WebRTC 同步战场', asy
   const guestState = await guest.evaluate(() => (window as any).__tankBattle.state);
   expect(hostState.seed).toBe(guestState.seed);
   expect(new TextEncoder().encode(JSON.stringify(hostState)).length).toBeGreaterThan(16300);
-  expect(guestState.version).toBe(6);
+  expect(guestState.version).toBe(7);
   expect(guestState.mapSize).toBe('large');
   expect(guestState.enemyBaseDiscovered).toBe(false);
   expect(guestState.explored.length).toBeGreaterThan(0);
   expect(guestState.difficulty).toBe('casual');
   expect(guestState.enemyBaseMaxHp).toBe(280);
+  expect(guestState.baseMaxHp).toBe(696);
+  expect(guestState.campUpgrades).toEqual({ baseArmor: 2, repair: 1 });
+  expect(guestState.tanks.find((t: any) => t.name === '房主坦克').maxHp).toBe(130);
+  expect(guestState.tanks.find((t: any) => t.name !== '房主坦克' && t.team === 'player').upgrades.reload).toBe(1);
   await expect(guest.locator('#difficultyBadge')).toHaveText('休闲');
   expect(hostState.mode).toBe('classic');
   expect(guestState.mode).toBe(hostState.mode);
@@ -188,6 +196,12 @@ test('手机创建房间，第二位玩家通过真实 WebRTC 同步战场', asy
   expect(hostGuest.z).toBeCloseTo(guestBefore.z);
   expect(Math.abs(hostGuest.x - guestSelf.x)).toBeLessThan(0.4);
   expect(Math.abs(hostGuest.z - guestSelf.z)).toBeLessThan(0.4);
+  await guest.locator('#mapToggle').tap();
+  const radar = (await guest.locator('#radar').boundingBox())!;
+  await guest.touchscreen.tap(radar.x + radar.width / 2, radar.y + radar.height / 2);
+  await expect.poll(() => host.evaluate(() => (window as any).__tankBattle.state.pings.length)).toBe(1);
+  expect(await host.evaluate(() => (window as any).__tankBattle.state.pings[0].owner)).toBe(guestSelf.id);
+  await guest.locator('#mapToggle').tap();
   await host.locator('#pauseButton').tap();
   await expect.poll(() => guest.evaluate(() => (window as any).__tankBattle.state.paused)).toBe(true);
   await guest.screenshot({ path: 'artifacts/multiplayer-guest.png' });

@@ -7,7 +7,8 @@ import { createMap, findPath } from '../src/game/world';
 
 describe('可驾驶山谷地形', () => {
   it('两侧有明显高地，营地、出生点和中央谷道保持平整', () => {
-    expect(groundHeight(-25, -18)).toBeGreaterThan(6);
+    // 延长桥头后，近岸一侧成为缓坡；山体北侧仍保留高地。
+    expect(groundHeight(-25, -26)).toBeGreaterThan(7);
     expect(groundHeight(25, 18)).toBeGreaterThan(7);
     for (const z of [BASE.z, ENEMY_BASE.z, PLAYER_SPAWN_Z, -24, 0, 24]) expect(groundHeight(0, z)).toBe(0);
     for (const x of [-3.75, -1.25, 1.25, 3.75]) expect(groundHeight(x, PLAYER_SPAWN_Z)).toBe(0);

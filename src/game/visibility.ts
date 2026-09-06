@@ -38,12 +38,17 @@ export function exploredCell(x: number, z: number, state: State) {
 export function updateVisibility(state: State) {
   const map = mapFor(state.mapSize);
   const players = state.tanks.filter(t => t.team === 'player' && t.connected && t.hp > 0);
-  state.visibleEnemies = state.tanks.filter(t => t.team === 'enemy' && players.some(p => visibleTo(state, p, t))).map(t => t.id);
+  // 普通敌军全局显示；高草是唯一的单位隐蔽规则，与敌营侦察分开。
+  state.visibleEnemies = state.tanks.filter(t => t.team === 'enemy' && t.hp > 0 && t.connected && !concealed(t, state)).map(t => t.id);
   if (state.mode === 'classic' && !state.enemyBaseDiscovered) {
     state.enemyBaseDiscovered = players.some(p => distance(p, map.enemyBase) < SCOUT_RANGE && sightClear(state, p, map.enemyBase, 2.7));
   }
   const explored = new Set(state.explored);
   const width = Math.ceil(map.arena.x * 2 / EXPLORE_STEP), height = Math.ceil(map.arena.z * 2 / EXPLORE_STEP);
+  if (state.mode === 'defense' || state.enemyBaseDiscovered) {
+    if (state.explored.length !== width * height) state.explored = Array.from({ length: width * height }, (_, i) => i);
+    return;
+  }
   for (const p of players) {
     const cx = Math.floor((p.x + map.arena.x) / EXPLORE_STEP), cz = Math.floor((p.z + map.arena.z) / EXPLORE_STEP);
     for (let iz = Math.max(0, cz - 4); iz <= Math.min(height - 1, cz + 4); iz++) for (let ix = Math.max(0, cx - 4); ix <= Math.min(width - 1, cx + 4); ix++) {

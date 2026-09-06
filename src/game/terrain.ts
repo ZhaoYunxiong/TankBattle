@@ -1,5 +1,5 @@
 import { clamp } from './types';
-import { mapFor, type MapDefinition } from './maps';
+import { mapFor, riverDistance, type MapDefinition } from './maps';
 
 export const TERRAIN_STEP = 2;
 
@@ -14,7 +14,11 @@ function elevation(x: number, z: number, map: MapDefinition) {
   let height = Math.max(0, ...map.hills.map(h => mesa(x, z, h.x, h.z, h.rx, h.rz, h.height)));
   // 河岸以缓坡接入统一水面；营地与出生区保持平整，换图不继承旧高度缓存。
   for (const r of map.rivers) {
-    const edge = Math.max(Math.abs(x - r.x) - r.width / 2, Math.abs(z - r.z) - r.depth / 2);
+    const edge = riverDistance({ x, z }, r) - 0.6;
+    height = Math.min(height, Math.max(0, edge) * 0.65);
+  }
+  for (const b of map.bridges) {
+    const edge = Math.max(Math.abs(x - b.x) - b.width / 2, Math.abs(z - b.z) - b.depth / 2);
     height = Math.min(height, Math.max(0, edge) * 0.65);
   }
   for (const p of [map.base, map.enemyBase, map.spawn, map.enemySpawn]) height = Math.min(height, Math.max(0, Math.hypot(x - p.x, z - p.z) - 9) * 0.6);

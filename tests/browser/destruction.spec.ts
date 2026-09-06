@@ -1,6 +1,6 @@
 import { test, expect } from '@playwright/test';
 
-test('树木倒伏、石块和墙块破碎后回收渲染资源', async ({ page }) => {
+test('树木残骸持续保留，石块和墙块的临时碎片回收', async ({ page }) => {
   await page.goto('./');
   await page.waitForFunction(() => (window as any).__tankBattle?.fps > 0);
   // 独立组件场景走真实命中和渲染流程，不向游戏页面暴露可写诊断入口。
@@ -33,6 +33,6 @@ test('树木倒伏、石块和墙块破碎后回收渲染资源', async ({ page 
   expect(result.during.treeTilt).toBeGreaterThan(0.1);
   expect(result.during.stone).toBeGreaterThan(0);
   expect(result.during.wall).toBeGreaterThan(0);
-  expect(result.treeAfter).toBe(false);
+  expect(result.treeAfter).toBe(true);
   expect(result.debrisAfter).toBe(0);
 });

@@ -1,4 +1,5 @@
 import { mapFor, type MapSize } from './maps';
+import type { Loadout } from './factory';
 
 export type Phase = 'lobby' | 'intermission' | 'battle' | 'won' | 'lost';
 
@@ -42,6 +43,8 @@ export interface Tank {
   score: number;
   connected: boolean;
   ready: boolean;
+  upgrades: Loadout;
+  stats: { kills: number; assists: number; defenses: number; baseDamage: number; teamBonus: number };
 }
 
 export interface Obstacle {
@@ -56,6 +59,8 @@ export interface Obstacle {
   maxHp: number;
   rotation: number;
   team?: Tank['team'];
+  tone?: number;
+  crown?: number;
 }
 
 export interface Shell {
@@ -91,13 +96,21 @@ export interface BattleEvent {
   power?: Power;
   obstacle?: number;
   material?: Obstacle['kind'];
+  target?: 'tank' | 'base';
+  sourceX?: number;
+  sourceZ?: number;
 }
 
-export const PROTOCOL_VERSION = 6;
+export interface Scar { id: number; x: number; z: number; radius: number; kind: 'crater' | 'impact'; surface: 'earth' | 'stone' | 'bridge'; rotation: number }
+
+export interface Ping { owner: string; x: number; z: number; until: number }
+
+export const PROTOCOL_VERSION = 7;
 
 export interface State {
   version: typeof PROTOCOL_VERSION;
   seed: number;
+  matchId: string;
   mode: GameMode;
   difficulty: Difficulty;
   mapSize: MapSize;
@@ -120,6 +133,9 @@ export interface State {
   shells: Shell[];
   drops: Drop[];
   events: BattleEvent[];
+  scars: Scar[];
+  pings: Ping[];
+  campUpgrades: { baseArmor: number; repair: number };
 }
 
 export const EMPTY_INPUT: Input = { moveX: 0, moveZ: 0, aim: Math.PI, fire: false };
@@ -145,11 +161,13 @@ export const POWER_LABELS: Record<Power, string> = {
 };
 
 export const POWER_EFFECTS: Record<Power, string> = {
-  rapid: '装填加快 · 12 秒', burst: '三枚连射 · 10 秒', heal: '恢复 35% 血量', armor: '受到伤害降低 30% · 12 秒',
+  rapid: '装填加快 · 小 / 中 / 大地图 60 / 90 / 120 秒', burst: '三枚连射 · 24 次主动开炮', heal: '恢复 35% 血量', armor: '吸收 90 点伤害 · 赶路不消耗',
 };
 
-export function pickupHint(kind: Power, tank: Tank) {
-  return kind === 'heal' && tank.hp >= tank.maxHp ? '满血无需维修 · 受伤后拾取' : POWER_EFFECTS[kind];
+export function rapidDuration(size: MapSize) { return { small: 60, medium: 90, large: 120 }[size]; }
+
+export function pickupHint(kind: Power, tank: Tank, size: MapSize = 'small') {
+  return kind === 'heal' && tank.hp >= tank.maxHp ? '满血无需维修 · 受伤后拾取' : kind === 'rapid' ? '装填加快 · ' + rapidDuration(size) + ' 秒' : POWER_EFFECTS[kind];
 }
 
 export const clamp = (value: number, min: number, max: number) => Math.max(min, Math.min(max, value));

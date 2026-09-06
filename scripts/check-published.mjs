@@ -19,6 +19,13 @@ try {
   assert.equal(await page.locator('#modeClassic').getAttribute('aria-pressed'), 'true');
   assert.equal(await page.locator('#difficulty').inputValue(), 'normal');
   await page.screenshot({ path: 'artifacts/published-menu.png' });
+  await page.locator('#careerButton').tap();
+  await page.locator('#careerDialog').waitFor({ state: 'visible' });
+  assert.match(await page.locator('#careerSummary').textContent(), /累计荣誉/);
+  await page.getByRole('button', { name: '坦克工厂', exact: true }).tap();
+  assert.equal(await page.locator('[data-upgrade]').count(), 5);
+  await page.screenshot({ path: 'artifacts/published-factory.png' });
+  await page.locator('#closeCareer').tap();
   await page.locator('#soloButton').tap();
   await page.locator('#hud').waitFor({ state: 'visible' });
   await page.waitForFunction(() => /敌军/.test(document.querySelector('#enemyCount')?.textContent || ''), null, { timeout: 20000 });
@@ -37,6 +44,9 @@ try {
   assert.equal(await page.evaluate(() => visualViewport.scale), 1);
   assert.match(await page.locator('#pickupLabels [data-power=heal]').textContent(), /满血无需维修/);
   await page.screenshot({ path: 'artifacts/published-battle.png' });
+  await page.locator('#mapToggle').tap();
+  assert.equal(await page.locator('#mapToggle').getAttribute('aria-expanded'), 'true');
+  await page.locator('#mapToggle').tap();
   await page.locator('#pauseButton').tap();
   assert.equal(await page.locator('#lives').isVisible(), true);
   assert.equal(await page.locator('#score').isVisible(), true);
@@ -71,7 +81,7 @@ try {
   assert.equal(await guest.locator('#difficultyBadge').textContent(), '休闲');
   await guest.screenshot({ path: 'artifacts/published-multiplayer.png' });
   assert.deepEqual(errors, []);
-  console.log(JSON.stringify({ url, http: response.status(), singlePlayer: 'passed', modes: ['classic', 'defense'], pageZoomGuard: 'passed', difficultySync: 'passed', largeMapSync: 'passed', scoutingHud: 'passed', pickupFeedback: 'passed', mobileLayout: 'passed', publicWebRTC: 'passed', pageErrors: errors }));
+  console.log(JSON.stringify({ url, http: response.status(), singlePlayer: 'passed', modes: ['classic', 'defense'], careerAndFactory: 'passed', tacticalMap: 'passed', pageZoomGuard: 'passed', difficultySync: 'passed', largeMapSync: 'passed', scoutingHud: 'passed', pickupFeedback: 'passed', mobileLayout: 'passed', publicWebRTC: 'passed', pageErrors: errors }));
 } finally {
   await browser.close();
 }

@@ -93,7 +93,8 @@ describe('战斗规则', () => {
     player.buffs.armor = 10;
     sim.state.shells.push(impact(0, 0));
     sim.step(1 / 30);
-    expect(player.hp).toBe(58);
+    expect(player.hp).toBe(62);
+    expect(player.buffs.armor).toBe(0);
   });
 
   it('同一份补给只能被一辆坦克拾取', () => {

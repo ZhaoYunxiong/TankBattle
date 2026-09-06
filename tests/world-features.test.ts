@@ -27,7 +27,7 @@ describe('可扩展地图、河流与路径', () => {
       }
       const sim = new Simulation(seed, mode, 'normal', map.id);
       sim.addPlayer('p', '探路者'); sim.start();
-      expect(sim.state.drops.length).toBe(2);
+      expect(sim.state.drops.length).toBe(2 + map.roads[0].length - 2);
       for (const drop of sim.state.drops) {
         expect(waterAt(drop, map)).not.toBe('deep');
         const path = findPath(sim.state.tanks[0], drop, sim.state.obstacles, mode, map, true);

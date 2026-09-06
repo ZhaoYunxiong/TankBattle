@@ -1,5 +1,7 @@
 import Peer, { type DataConnection, type PeerOptions } from 'peerjs';
 import { PROTOCOL_VERSION, type Input, type State } from './game/types';
+import { cleanLoadout, type Loadout } from './game/factory';
+import { uniqueId } from './id';
 
 // 房间地址前缀沿用旧值，握手版本不同时可以明确提示双方刷新页面。
 const PREFIX = 'valley-tanks-v1-';
@@ -9,17 +11,19 @@ export class Rooms {
 
   code = '';
 
-  readonly playerId = 'tank-player-' + (crypto.randomUUID?.() ?? Array.from(crypto.getRandomValues(new Uint8Array(16)), b => b.toString(16).padStart(2, '0')).join(''));
+  readonly playerId = 'tank-player-' + uniqueId();
 
   onState: (state: State) => void = () => {};
 
-  onJoin: (id: string, name: string) => boolean = () => false;
+  onJoin: (id: string, name: string, upgrades: Loadout) => boolean = () => false;
 
   onLeave: (id: string) => void = () => {};
 
   onInput: (id: string, input: unknown) => void = () => {};
 
   onReady: (id: string, ready: boolean) => void = () => {};
+
+  onPing: (id: string, point: unknown) => void = () => {};
 
   onError: (message: string) => void = () => {};
 
@@ -91,18 +95,19 @@ export class Rooms {
       peer.on('connection', connection => {
         connection.on('error', () => {});
         connection.on('open', () => {
-          const metadata = connection.metadata as { name?: unknown; version?: number } | undefined;
-          if (metadata?.version !== PROTOCOL_VERSION || this.connections.size >= 3 || !this.onJoin(connection.peer, typeof metadata.name === 'string' ? metadata.name.slice(0, 16) : '守卫者')) {
+          const metadata = connection.metadata as { name?: unknown; version?: number; upgrades?: unknown } | undefined;
+          if (metadata?.version !== PROTOCOL_VERSION || this.connections.size >= 3 || !this.onJoin(connection.peer, typeof metadata.name === 'string' ? metadata.name.slice(0, 16) : '守卫者', cleanLoadout(metadata.upgrades))) {
             connection.send({ type: 'rejected', reason: '房间已满，或游戏版本不一致。请刷新后重试。' });
             window.setTimeout(() => connection.close(), 200);
             return;
           }
           this.connections.set(connection.peer, connection);
           connection.on('data', raw => {
-            const packet = raw as { type?: string; input?: unknown; ready?: unknown };
+            const packet = raw as { type?: string; input?: unknown; ready?: unknown; point?: unknown };
             if (!packet || typeof packet !== 'object') return;
             if (packet.type === 'input') this.onInput(connection.peer, packet.input);
             if (packet.type === 'ready' && typeof packet.ready === 'boolean') this.onReady(connection.peer, packet.ready);
+            if (packet.type === 'ping') this.onPing(connection.peer, packet.point);
           });
           connection.on('close', () => {
             if (this.connections.get(connection.peer) !== connection) return;
@@ -115,7 +120,7 @@ export class Rooms {
     return this.code;
   }
 
-  async join(code: string, name: string) {
+  async join(code: string, name: string, upgrades?: Loadout) {
     this.close();
     this.role = 'guest';
     this.code = code.trim().toUpperCase();
@@ -123,7 +128,7 @@ export class Rooms {
     try {
       const peer = await this.open(this.playerId);
       // JSON 通道会拒绝超过 16,300 字节的消息；大地图改用可自动分片重组的二进制序列化。
-      const connection = peer.connect(PREFIX + this.code, { reliable: true, serialization: 'binary', metadata: { name, version: PROTOCOL_VERSION } });
+      const connection = peer.connect(PREFIX + this.code, { reliable: true, serialization: 'binary', metadata: { name, version: PROTOCOL_VERSION, upgrades: cleanLoadout(upgrades) } });
       this.host = connection;
       await new Promise<void>((resolve, reject) => {
         const timer = window.setTimeout(() => reject(new Error('没有连上房主。请检查房间号；同一 Wi-Fi 通常更容易直连。')), 18000);
@@ -133,7 +138,7 @@ export class Rooms {
           if (!packet || typeof packet !== 'object') return;
           if (packet.type === 'rejected') { clearTimeout(timer); reject(new Error(packet.reason || '房间拒绝了连接。')); return; }
           const state = packet.state;
-          if (packet.type === 'state' && state?.version === PROTOCOL_VERSION && (state.mode === 'classic' || state.mode === 'defense') && ['casual', 'normal', 'challenge'].includes(state.difficulty) && ['small', 'medium', 'large'].includes(state.mapSize) && typeof state.enemyBaseDiscovered === 'boolean' && Array.isArray(state.visibleEnemies) && Array.isArray(state.explored) && Array.isArray(state.tanks) && state.tanks.length <= 20 && Array.isArray(state.obstacles) && Array.isArray(state.events)) {
+          if (packet.type === 'state' && state?.version === PROTOCOL_VERSION && typeof state.matchId === 'string' && (state.mode === 'classic' || state.mode === 'defense') && ['casual', 'normal', 'challenge'].includes(state.difficulty) && ['small', 'medium', 'large'].includes(state.mapSize) && typeof state.enemyBaseDiscovered === 'boolean' && Array.isArray(state.visibleEnemies) && Array.isArray(state.explored) && Array.isArray(state.tanks) && state.tanks.length <= 20 && state.tanks.every(t => t.upgrades && t.stats && typeof t.name === 'string' && [t.score, t.stats.kills, t.stats.assists, t.stats.defenses, t.stats.baseDamage, t.stats.teamBonus].every(Number.isFinite)) && state.campUpgrades && Array.isArray(state.scars) && Array.isArray(state.pings) && Array.isArray(state.obstacles) && Array.isArray(state.events)) {
             this.lastStateAt = performance.now();
             this.onState(state);
             if (!receivedState) { receivedState = true; clearTimeout(timer); resolve(); }
@@ -163,6 +168,10 @@ export class Rooms {
 
   ready(value: boolean) {
     if (this.host?.open) this.host.send({ type: 'ready', ready: value });
+  }
+
+  ping(point: { x: number; z: number }) {
+    if (this.host?.open) this.host.send({ type: 'ping', point });
   }
 
   close() {

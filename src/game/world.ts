@@ -19,18 +19,31 @@ export function createMap(seed: number, mode: GameMode = 'classic', map = mapFor
     const hp = kind === 'tree' ? 35 : kind === 'rock' ? variant === 'layered' ? 100 : 80 : 100;
     result.push({ id: result.length + 1, kind, x, z, radius, height, hp, maxHp: hp, rotation, ...(variant ? { variant } : {}), ...(team ? { team } : {}) });
   };
-  for (let i = 0; i < map.vegetation; i++) {
-    const x = (random() - 0.5) * (map.arena.x * 2 - 6);
-    const z = (random() - 0.5) * (map.arena.z * 2 - 8);
-    const rock = i % 5 === 0;
-    const variant: Obstacle['variant'] = rock ? (['low', 'boulder', 'layered'] as const)[i % 3] : (['pine', 'round', 'birch', 'dead'] as const)[i % 4];
-    const radius = rock ? variant === 'low' ? 1.1 : 1.8 : 0.75;
+  const groves = Array.from({ length: Math.ceil(map.vegetation / 18) }, (_, i) => ({
+    x: (random() - 0.5) * (map.arena.x * 2 - 18), z: (random() - 0.5) * (map.arena.z * 2 - 18),
+    radius: 9 + random() * 9, species: (['pine', 'round', 'birch'] as const)[i % 3], tone: i % 3,
+  }));
+  // 林区集中生长、外围自然稀疏；道路、桥头和高草仍预留可达空间。
+  for (let i = 0; i < map.vegetation * 9 && result.length < map.vegetation; i++) {
+    const grove = groves[i % groves.length], a = random() * Math.PI * 2, r = random() * grove.radius;
+    const scatter = i % 7 === 0;
+    const x = scatter ? (random() - 0.5) * (map.arena.x * 2 - 6) : grove.x + Math.sin(a) * r;
+    const z = scatter ? (random() - 0.5) * (map.arena.z * 2 - 8) : grove.z + Math.cos(a) * r;
+    if (Math.abs(x) > map.arena.x - 3 || Math.abs(z) > map.arena.z - 3) continue;
+    const rock = i % 9 === 0;
+    const variant: Obstacle['variant'] = rock ? (['low', 'boulder', 'layered'] as const)[Math.floor(i / 9) % 3] : random() < 0.045 ? 'dead' : random() < 0.18 ? (['pine', 'round', 'birch'] as const)[i % 3] : grove.species;
+    const radius = rock ? variant === 'low' ? 1.1 : 1.8 : 0.48 + random() * 0.32;
     if (roadDistance({ x, z }, map) < radius + 2.7 || waterAt({ x, z }, map) || map.bridges.some(b => inRegion({ x, z }, b, 3))) continue;
+    const firstGrass = map.grass[0];
+    // 出生区到第一片高草留出入口，玩家无需先开炮清树就能尝试伏击。
+    if (firstGrass && (segmentCircle(map.spawn.x, map.spawn.z, firstGrass.x, map.spawn.z, x, z, radius + 1.6) !== null ||
+      segmentCircle(firstGrass.x, map.spawn.z, firstGrass.x, firstGrass.z, x, z, radius + 1.6) !== null)) continue;
     if ([map.base, map.enemyBase, map.spawn, map.enemySpawn].some(p => distance(p, { x, z }) < 10)) continue;
     if (map.grass.some(g => inRegion({ x, z }, g, 1.4))) continue;
-    if (result.some(o => distance(o, { x, z }) < o.radius + radius + 1.4)) continue;
-    const height = rock ? variant === 'low' ? 0.85 : variant === 'layered' ? 4.5 : 3 : 3 + random() * 2;
+    if (result.some(o => distance(o, { x, z }) < o.radius + radius + (rock ? 1.4 : 0.4))) continue;
+    const height = rock ? variant === 'low' ? 0.85 : variant === 'layered' ? 4.5 : 3 : 2.2 + Math.pow(random(), 0.8) * (variant === 'pine' ? 5.6 : variant === 'birch' ? 4.8 : 4);
     add(rock ? 'rock' : 'tree', x, z, radius, height, variant);
+    if (!rock) Object.assign(result.at(-1)!, { tone: grove.tone * 2 + Math.floor(random() * 2), crown: 0.75 + random() * 0.7 });
   }
   const camp = (p: Point, facing: number, team: Tank['team']) => {
     for (const x of [-4.4, -2.2, 2.2, 4.4]) add('wall', p.x + x, p.z + facing * 4.5, 1, 1.95, undefined, team, 0);
@@ -51,6 +64,8 @@ export function blocked(x: number, z: number, obstacles: Obstacle[], radius = 0.
 
 // 占用网格只在障碍摧毁后重建，避免大地图的每一步 A* 扫描全部树木。
 const navigation = new WeakMap<Obstacle[], { signature: string; cells: Uint8Array }>();
+
+const waterEdges = new WeakMap<MapDefinition, Map<number, boolean>>();
 
 function navGrid(obstacles: Obstacle[], mode: GameMode, map: MapDefinition) {
   const signature = map.id + mode + obstacles.filter(o => o.hp > 0).map(o => o.id).join(',');
@@ -106,6 +121,8 @@ export function findPath(start: Point, end: Point, obstacles: Obstacle[], mode: 
   const campTarget = distance(end, map.base) < 0.1 || (mode === 'classic' && distance(end, map.enemyBase) < 0.1);
   const arrive = exact ? 1.5 : campTarget ? 5.2 : 2.8;
   const first = cell(start), grid = navGrid(obstacles, mode, map);
+  let edges = waterEdges.get(map);
+  if (!edges) { edges = new Map(); waterEdges.set(map, edges); }
   const open = new Frontier();
   const came = new Int32Array(grid.length).fill(-1);
   const g = new Float64Array(grid.length).fill(Infinity);
@@ -124,6 +141,14 @@ export function findPath(start: Point, end: Point, obstacles: Obstacle[], mode: 
       if (next < 0 || next >= width * height || closed[next] || grid[next]) continue;
       const q = point(next);
       if (distance(p, q) > 2.1) continue;
+      // 弯曲岸线不能仅检查端点，否则路径会切入深水边缘后让坦克卡住。
+      const edgeKey = Math.min(current, next) * grid.length + Math.max(current, next);
+      let crossesWater = edges.get(edgeKey);
+      if (crossesWater === undefined) {
+        crossesWater = [0.25, 0.5, 0.75].some(t => waterBlocked({ x: p.x + (q.x - p.x) * t, z: p.z + (q.z - p.z) * t }, map, 0.95));
+        edges.set(edgeKey, crossesWater);
+      }
+      if (crossesWater) continue;
       const rise = groundHeight(q.x, q.z, map) - groundHeight(p.x, p.z, map);
       const cost = g[current] + (Math.hypot(2, rise) + Math.max(0, rise) * 0.24) / (waterAt(q, map) === 'shallow' ? 0.6 : 1);
       if (cost < g[next]) { came[next] = current; g[next] = cost; open.push(next, cost + h(next)); }
